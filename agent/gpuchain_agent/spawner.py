@@ -109,8 +109,9 @@ class Runner:
         else:
             args = [sys.executable, "-m", "gpuchain_runtime.run", str(self.workdir / "config.json")]
             env = {**os.environ, **(extra_env or {})}
-        log = open(self.workdir / "runtime.log", "ab")
-        self.process = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, env=env)
+        # The child keeps its own copy of the log handle, so the parent's can be closed right after the start.
+        with open(self.workdir / "runtime.log", "ab") as log:
+            self.process = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, env=env)
 
     def poll(self) -> int | None:
         return None if self.process is None else self.process.poll()
