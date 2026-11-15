@@ -9,7 +9,7 @@ import time
 import math
 import unittest
 from pathlib import Path
-from unittest import mock
+import unittest.mock as mock
 import torch
 
 from ekido_core.gpck import manifest_hash, read_manifest
