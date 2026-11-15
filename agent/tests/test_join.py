@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from eth_account import Account
 
-from ekido_agent.join import detect_device, http_base, join_document, load_or_create_key
+from ekido_agent.join import default_key_file, detect_device, http_base, join_document, load_or_create_key
 from ekido_core.signing import sign_document, verify_document
 
 
@@ -25,6 +25,19 @@ class JoinTest(unittest.TestCase):
             first = load_or_create_key(path)
             self.assertTrue(path.exists())
             self.assertEqual(load_or_create_key(path), first)
+
+    def test_a_key_from_before_the_rename_is_used_where_it_is(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            self.assertEqual(default_key_file(home), home / ".ekido" / "provider.key")
+            earlier = home / ".gpuchain" / "provider.key"
+            earlier.parent.mkdir()
+            earlier.write_text("0x" + "9" * 64)
+            self.assertEqual(default_key_file(home), earlier)
+            current = home / ".ekido" / "provider.key"
+            current.parent.mkdir()
+            current.write_text("0x" + "a" * 64)
+            self.assertEqual(default_key_file(home), current)
 
     def test_the_environment_key_wins_over_the_file(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PROVIDER_WALLET_KEY": "0x" + "8" * 64}):

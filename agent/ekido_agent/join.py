@@ -3,7 +3,7 @@
     python -m ekido_agent.join --coordinator wss://<coordinator address> --name "My RTX 4060" --price 0.002
 
 - The provider wallet's key stays on this machine. It comes from PROVIDER_WALLET_KEY, or from a key file this
-  command creates the first time (default ~/.gpuchain/provider.key). Only the address is ever sent or printed.
+  command creates the first time (default ~/.ekido/provider.key). Only the address is ever sent or printed.
 - The device is found automatically: CUDA if torch can see a GPU, otherwise the CPU. --device overrides it.
 - Payment goes to the wallet, and only for work the verifiers accept. Testnet only: never use a wallet that
   holds real funds.
@@ -33,6 +33,16 @@ from .onchain import Rpc, list_on_chain
 
 JOIN_KIND = "gpuchain.provider_join.v1"
 CPU_DEFAULT_MIB = 4096  # A CPU has no memory reading the runtime can enforce, so a declared figure is used.
+
+
+def default_key_file(home: Path | None = None) -> Path:
+    """~/.ekido/provider.key, unless only a key from before the rename exists at ~/.gpuchain/provider.key.
+
+    The old key is used where it is, never copied, so a provider keeps its wallet, history and earnings.
+    """
+    home = home or Path.home()
+    current, earlier = home / ".ekido" / "provider.key", home / ".gpuchain" / "provider.key"
+    return earlier if earlier.is_file() and not current.exists() else current
 
 
 def load_or_create_key(key_file: Path) -> str:
@@ -108,7 +118,7 @@ def main() -> None:
     parser.add_argument("--price", required=True, help="USDC per accepted training step, such as 0.002.")
     parser.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
     parser.add_argument("--capacity-mib", type=int, help="Memory to offer. Defaults to the whole GPU, or 4096 MiB on a CPU.")
-    parser.add_argument("--key-file", type=Path, default=Path.home() / ".gpuchain" / "provider.key")
+    parser.add_argument("--key-file", type=Path, default=None, help="Default: ~/.ekido/provider.key, or the key an earlier version made at ~/.gpuchain/provider.key.")
     parser.add_argument("--workdir", default="agent_runs")
     parser.add_argument("--chain", choices=("auto", "base-sepolia", "none"), default="auto", help="Where to commit your listing. auto: Base Sepolia when joining a public (wss://) coordinator.")
     parser.add_argument("--rpc", default="https://sepolia.base.org", help="Base Sepolia RPC used for the on-chain listing.")
@@ -116,7 +126,7 @@ def main() -> None:
     if not args.coordinator.startswith(("ws://", "wss://")):
         parser.error("--coordinator must start with ws:// or wss://")
 
-    key = load_or_create_key(args.key_file)
+    key = load_or_create_key(args.key_file or default_key_file())
     wallet = Account.from_key(key).address
     device, capacity = detect_device(args.device, args.capacity_mib)
     print(f"Wallet {wallet}. Offering the {'GPU' if device == 'cuda' else 'CPU'} with {capacity} MiB at {args.price} USDC a step.")

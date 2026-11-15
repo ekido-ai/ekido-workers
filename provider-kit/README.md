@@ -28,7 +28,7 @@ The website's "Rent out your GPU" page builds the exact join command for you.
 
 ## Your key and your money
 
-- **Your key:** on first run, `join` creates a test-network wallet key at `~/.gpuchain/provider.key` and prints only its address. **Never share that file.** Anyone holding it can sign work and withdraw as you.
+- **Your key:** on first run, `join` creates a test-network wallet key at `~/.ekido/provider.key` and prints only its address. A key an earlier version made at `~/.gpuchain/provider.key` is used where it is. **Never share that file.** Anyone holding it can sign work and withdraw as you.
 - **What you earn:** your price for every accepted step. Work that's refused, and steps not yet saved in a checkpoint, earn nothing.
 - **Getting it out:** earnings wait in the escrow contract under your address until you call `withdraw()`. See what you're owed on the website's On-chain page.
 
