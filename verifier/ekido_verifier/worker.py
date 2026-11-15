@@ -1,6 +1,6 @@
 """A verifier process: pulls evaluation tasks, judges them, and returns signed reports.
 
-    python -m gpuchain_verifier.worker --coordinator http://127.0.0.1:8000 --key 0x... --device cuda
+    python -m ekido_verifier.worker --coordinator http://127.0.0.1:8000 --key 0x... --device cuda
 
 Each verifier has its own key. In this prototype the team operates them all, so this is a permissioned
 set, and the product says so.
@@ -21,11 +21,11 @@ from pathlib import Path
 
 from eth_account import Account
 
-from gpuchain_core.settlement import build_verdict
-from gpuchain_core.checkpoint_files import checkpoint_files
-from gpuchain_core.download import save_checkpoint_blob
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.signing import sign_document, sign_verdict, verify_document
+from ekido_core.settlement import build_verdict
+from ekido_core.checkpoint_files import checkpoint_files
+from ekido_core.download import save_checkpoint_blob
+from ekido_core.canonical import document_hash
+from ekido_core.signing import sign_document, sign_verdict, verify_document
 
 from .evaluate import evaluate_checkpoint, load_eval_set, sign_report
 from .secure_verdict import sign_checked_verdict

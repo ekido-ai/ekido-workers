@@ -8,10 +8,10 @@ from unittest.mock import Mock, patch
 
 import websockets
 
-from gpuchain_agent.agent import Agent, AgentConfig
-from gpuchain_agent.spawner import DockerOptions, Runner, container_name, docker_run_args, reap_orphans
-from gpuchain_agent.tailer import EventTailer
-from gpuchain_agent.telemetry import native_bf16, parse_nvidia_smi
+from ekido_agent.agent import Agent, AgentConfig
+from ekido_agent.spawner import DockerOptions, Runner, container_name, docker_run_args, reap_orphans
+from ekido_agent.tailer import EventTailer
+from ekido_agent.telemetry import native_bf16, parse_nvidia_smi
 
 
 class Telemetry(unittest.TestCase):
@@ -68,7 +68,7 @@ class DockerSecurity(unittest.TestCase):
             self.assertNotIn(bad, joined)
 
     def test_runs_only_the_runtime_module(self):
-        self.assertEqual(self.args[-4:], ["python", "-m", "gpuchain_runtime.run", "/run_data/config.json"])
+        self.assertEqual(self.args[-4:], ["python", "-m", "ekido_runtime.run", "/run_data/config.json"])
 
     def test_code_mounts_are_read_only(self):
         args = docker_run_args("n", "/work", DockerOptions(code_mounts=(("/src", "/app"),)))
@@ -81,7 +81,7 @@ class DockerSecurity(unittest.TestCase):
         self.assertNotEqual(container_name("abc", 1), container_name("abc", 2))
 
     def test_startup_does_not_kill_other_agents_containers(self):
-        with patch("gpuchain_agent.spawner.subprocess.run") as docker:
+        with patch("ekido_agent.spawner.subprocess.run") as docker:
             self.assertEqual(reap_orphans(), [])
             docker.assert_not_called()
 

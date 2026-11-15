@@ -5,11 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.signing import sign_document
-from gpuchain_runtime.run import run
-from gpuchain_runtime.synthetic import exec_config, synthetic_spec
-from gpuchain_verifier.evaluate import evaluate_checkpoint, load_eval_set, quorum_verdict, sign_report
+from ekido_core.canonical import document_hash
+from ekido_core.signing import sign_document
+from ekido_runtime.run import run
+from ekido_runtime.synthetic import exec_config, synthetic_spec
+from ekido_verifier.evaluate import evaluate_checkpoint, load_eval_set, quorum_verdict, sign_report
 
 JOB = "00000000-0000-0000-0000-000000000001"
 PROVIDER_KEY = "0x" + "11" * 32

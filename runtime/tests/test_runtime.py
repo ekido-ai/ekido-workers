@@ -1,7 +1,7 @@
 """The correctness tests the whole design rests on. Run on CPU, so they need no GPU.
 
 From the repo root:
-  PYTHONPATH=packages/gpuchain_core:workers/runtime python -m unittest discover -s workers/runtime/tests
+  PYTHONPATH=packages/ekido_core:workers/runtime python -m unittest discover -s workers/runtime/tests
 """
 
 import json
@@ -13,8 +13,8 @@ from pathlib import Path
 import torch
 from safetensors.torch import save_file
 
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.gpck import (
+from ekido_core.canonical import document_hash
+from ekido_core.gpck import (
     OPTIMIZER_FILE,
     TRAINABLE_FILE,
     CheckpointError,
@@ -24,9 +24,9 @@ from gpuchain_core.gpck import (
     restore_optimizer_state,
     write_checkpoint,
 )
-from gpuchain_core.logical import logical_batch_indices
-from gpuchain_runtime.synthetic import SyntheticClassifier, SyntheticData, exec_config, synthetic_spec
-from gpuchain_runtime.trainer import (
+from ekido_core.logical import logical_batch_indices
+from ekido_runtime.synthetic import SyntheticClassifier, SyntheticData, exec_config, synthetic_spec
+from ekido_runtime.trainer import (
     accumulate_gradients,
     amp_dtype,
     canary_loss,
@@ -343,7 +343,7 @@ class EmptyOptimizerState(unittest.TestCase):
             dropped = next(name for name in tensors if name.endswith(".exp_avg"))
             del tensors[dropped]
             save_file(tensors, str(path))
-            from gpuchain_core.gpck import sha256_file
+            from ekido_core.gpck import sha256_file
 
             manifest["files"][OPTIMIZER_FILE] = {"sha256": sha256_file(path), "bytes": path.stat().st_size}
             (Path(tmp) / "manifest.json").write_text(json.dumps(manifest))
@@ -376,7 +376,7 @@ class MaliciousCheckpoints(unittest.TestCase):
         self.assertEqual(caught.exception.code, code)
 
     def rewrite_manifest(self):
-        from gpuchain_core.gpck import sha256_file
+        from ekido_core.gpck import sha256_file
 
         for name in (TRAINABLE_FILE, OPTIMIZER_FILE):
             path = self.dir / name

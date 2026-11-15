@@ -6,9 +6,9 @@ from unittest.mock import Mock, patch
 
 import torch
 
-from gpuchain_core.data_identity import hash_text_labels
-from gpuchain_runtime.workloads import build_workload
-from gpuchain_verifier.evaluate import load_eval_set
+from ekido_core.data_identity import hash_text_labels
+from ekido_runtime.workloads import build_workload
+from ekido_verifier.evaluate import load_eval_set
 
 
 class Rows(list):

@@ -4,10 +4,10 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from gpuchain_core.signing import recover_verdict_signer
-from gpuchain_verifier.payout_check import PayoutEvidenceError
-from gpuchain_verifier.secure_verdict import sign_checked_verdict
-from gpuchain_verifier.worker import Verifier, verdict_from_inputs
+from ekido_core.signing import recover_verdict_signer
+from ekido_verifier.payout_check import PayoutEvidenceError
+from ekido_verifier.secure_verdict import sign_checked_verdict
+from ekido_verifier.worker import Verifier, verdict_from_inputs
 import test_payout_check
 
 
@@ -24,7 +24,7 @@ class SecureVerdict(unittest.TestCase):
 
     def test_signs_correct_payout_using_configured_chain(self):
         f = self.fixture
-        with patch("gpuchain_verifier.secure_verdict.read_chain_context", return_value=f.chain) as reader:
+        with patch("ekido_verifier.secure_verdict.read_chain_context", return_value=f.chain) as reader:
             signature = self.sign()
         self.assertEqual(recover_verdict_signer(verdict_from_inputs(f.inputs), 31337, f.chain["contract"], signature).lower(), f.v1)
         self.assertEqual(reader.call_args.args[:3], ("http://independent-rpc", 31337, f.chain["contract"]))
@@ -33,9 +33,9 @@ class SecureVerdict(unittest.TestCase):
         f = self.fixture
         f.inputs["payouts"] = {"0x" + "9" * 40: "5"}
         f.inputs["refund"] = "0"
-        with patch("gpuchain_verifier.secure_verdict.read_chain_context", return_value=f.chain):
+        with patch("ekido_verifier.secure_verdict.read_chain_context", return_value=f.chain):
             with self.assertRaises(PayoutEvidenceError): self.sign()
-        with patch("gpuchain_verifier.secure_verdict.read_chain_context", side_effect=OSError("RPC down")):
+        with patch("ekido_verifier.secure_verdict.read_chain_context", side_effect=OSError("RPC down")):
             with self.assertRaises(OSError): self.sign()
 
     def test_fails_closed_for_a_failed_job_until_refund_path_is_ready(self):
@@ -49,7 +49,7 @@ class SecureVerdict(unittest.TestCase):
         report_key = (f.inputs["job_id"], f.inputs["final_checkpoint_hash"])
         worker.final_context[report_key] = (f.spec, f.policy)
         worker.final_reports.update(f.own_reports)
-        with patch("gpuchain_verifier.secure_verdict.read_chain_context", return_value=f.chain):
+        with patch("ekido_verifier.secure_verdict.read_chain_context", return_value=f.chain):
             self.assertIsNotNone(worker.sign_verdict_task(f.inputs))
             f.inputs["payouts"] = {"0x" + "9" * 40: "5"}
             f.inputs["refund"] = "0"
@@ -70,7 +70,7 @@ class SecureVerdict(unittest.TestCase):
             worker = Verifier("http://coordinator", self.key, "cpu", 512, **options)
             worker._record_final_report(f.inputs["reports"][0], f.spec, f.policy)
             restarted = Verifier("http://coordinator", self.key, "cpu", 512, **options)
-            with patch("gpuchain_verifier.secure_verdict.read_chain_context", return_value=f.chain):
+            with patch("ekido_verifier.secure_verdict.read_chain_context", return_value=f.chain):
                 self.assertIsNotNone(restarted.sign_verdict_task(f.inputs))
                 path = next(Path(directory).glob("*.json"))
                 saved = json.loads(path.read_text(encoding="utf-8"))

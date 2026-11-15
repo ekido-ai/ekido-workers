@@ -1,6 +1,6 @@
 """Tries a candidate config for real and measures it. This is what lets the compiler approve one.
 
-    python -m gpuchain_runtime.probe <config.json> <result.json>
+    python -m ekido_runtime.probe <config.json> <result.json>
 
 Runs as its own process, so a failed attempt can't leave fragmented or stuck GPU memory behind.
 Exit code is 0 whenever a result was written, including out of memory, which is a valid answer.

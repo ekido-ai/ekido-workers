@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from gpuchain_verifier.worker import Verifier
+from ekido_verifier.worker import Verifier
 
 
 class CheckpointDownloads(unittest.TestCase):

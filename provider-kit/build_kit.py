@@ -1,4 +1,4 @@
-"""Builds the provider kit the website serves: apps/web-combined/public/gpuchain-provider-kit.zip.
+"""Builds the provider kit the website serves: apps/web-combined/public/ekido-provider-kit.zip.
 
 Only the agent, runtime and core sources go in, without tests, caches or anything key-like, plus the
 scripts in this folder. Writes the SHA-256 next to the zip so the download page can show it.
@@ -9,11 +9,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-OUT = ROOT / "apps" / "web-combined" / "public" / "gpuchain-provider-kit.zip"
+OUT = ROOT / "apps" / "web-combined" / "public" / "ekido-provider-kit.zip"
 TREES = {
-    "core": ROOT / "packages" / "gpuchain_core" / "gpuchain_core",
-    "agent": ROOT / "workers" / "agent" / "gpuchain_agent",
-    "runtime": ROOT / "workers" / "runtime" / "gpuchain_runtime",
+    "core": ROOT / "packages" / "ekido_core" / "ekido_core",
+    "agent": ROOT / "workers" / "agent" / "ekido_agent",
+    "runtime": ROOT / "workers" / "runtime" / "ekido_runtime",
 }
 SCRIPTS = ["README.md", "requirements.txt", "setup.sh", "setup.ps1", "join.sh", "join.ps1"]
 SKIP_PARTS = {"__pycache__", "tests", ".pytest_cache"}
@@ -22,7 +22,7 @@ STAMP = (2026, 11, 9, 0, 0, 0)
 
 
 def add(z: zipfile.ZipFile, name: str, data: bytes, mode: int) -> None:
-    info = zipfile.ZipInfo(f"gpuchain-provider/{name}", date_time=STAMP)
+    info = zipfile.ZipInfo(f"ekido-provider/{name}", date_time=STAMP)
     info.external_attr = mode << 16
     info.compress_type = zipfile.ZIP_DEFLATED
     z.writestr(info, data)
@@ -44,7 +44,7 @@ def main() -> None:
                     continue
                 add(z, f"{top}/{src.name}/{rel.as_posix()}", path.read_bytes(), 0o644)
     digest = hashlib.sha256(OUT.read_bytes()).hexdigest()
-    (OUT.parent / "gpuchain-provider-kit.sha256").write_text(f"{digest}  gpuchain-provider-kit.zip\n", newline="\n")
+    (OUT.parent / "ekido-provider-kit.sha256").write_text(f"{digest}  ekido-provider-kit.zip\n", newline="\n")
     with zipfile.ZipFile(OUT) as z:
         print(f"{len(z.namelist())} files, {OUT.stat().st_size / 1024:.0f} KB, sha256 {digest}")
 

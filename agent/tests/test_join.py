@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 from eth_account import Account
 
-from gpuchain_agent.join import detect_device, http_base, join_document, load_or_create_key
-from gpuchain_core.signing import sign_document, verify_document
+from ekido_agent.join import detect_device, http_base, join_document, load_or_create_key
+from ekido_core.signing import sign_document, verify_document
 
 
 class JoinTest(unittest.TestCase):

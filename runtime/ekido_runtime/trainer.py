@@ -12,7 +12,7 @@ from typing import Callable, Mapping, Sequence
 
 import torch
 
-from gpuchain_core.logical import (
+from ekido_core.logical import (
     check_exec_config,
     learning_rate,
     logical_batch_indices,

@@ -1,6 +1,6 @@
 """The provider agent: connects out to the coordinator and runs what it's told.
 
-    python -m gpuchain_agent.agent --coordinator ws://127.0.0.1:8000 --provider-id ... --wallet-key ... --mode docker
+    python -m ekido_agent.agent --coordinator ws://127.0.0.1:8000 --provider-id ... --wallet-key ... --mode docker
 
 Telemetry and hardware details it reports are self-reported by the provider, and are labelled so.
 """
@@ -27,9 +27,9 @@ from pathlib import Path
 import websockets
 from eth_account import Account
 
-from gpuchain_core.signing import sign_document
-from gpuchain_core.checkpoint_files import checkpoint_files
-from gpuchain_core.download import save_checkpoint_blob
+from ekido_core.signing import sign_document
+from ekido_core.checkpoint_files import checkpoint_files
+from ekido_core.download import save_checkpoint_blob
 
 from .spawner import CONTAINER_WORKDIR, DockerOptions, Runner, probe_command, reap_orphans
 from .tailer import EventTailer
@@ -420,7 +420,7 @@ def main() -> None:
     parser.add_argument("--worker-key", default=os.environ.get("PROVIDER_WORKER_KEY"), help="Generated when omitted.")
     parser.add_argument("--workdir", default="agent_runs")
     parser.add_argument("--mode", choices=("docker", "process"), default="docker")
-    parser.add_argument("--image", default="gpuchain-runtime:spike")
+    parser.add_argument("--image", default="ekido-runtime:spike")
     parser.add_argument("--repo-root", help="Mounts code from here, read-only. Development only.")
     parser.add_argument("--device", help="Force cpu or cuda.")
     parser.add_argument("--no-gpu", action="store_true")

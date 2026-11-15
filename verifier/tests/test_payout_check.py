@@ -3,10 +3,10 @@ import copy
 import unittest
 
 from eth_account import Account
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.payout_terms import workload_hash
-from gpuchain_core.signing import sign_document
-from gpuchain_verifier.payout_check import MAX_MANIFESTS, MAX_PROVIDERS, MAX_REPORTS, PayoutEvidenceError, check_passing_evidence
+from ekido_core.canonical import document_hash
+from ekido_core.payout_terms import workload_hash
+from ekido_core.signing import sign_document
+from ekido_verifier.payout_check import MAX_MANIFESTS, MAX_PROVIDERS, MAX_REPORTS, PayoutEvidenceError, check_passing_evidence
 
 
 def address(key):

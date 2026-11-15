@@ -1,6 +1,6 @@
 """One command to rent out a GPU or CPU: signs up with the coordinator, then stays connected and takes work.
 
-    python -m gpuchain_agent.join --coordinator wss://<coordinator address> --name "My RTX 4060" --price 0.002
+    python -m ekido_agent.join --coordinator wss://<coordinator address> --name "My RTX 4060" --price 0.002
 
 - The provider wallet's key stays on this machine. It comes from PROVIDER_WALLET_KEY, or from a key file this
   command creates the first time (default ~/.gpuchain/provider.key). Only the address is ever sent or printed.
@@ -25,8 +25,8 @@ from pathlib import Path
 
 from eth_account import Account
 
-from gpuchain_core.provider_meta import REGISTRIES, metadata_hash, provider_metadata
-from gpuchain_core.signing import sign_document
+from ekido_core.provider_meta import REGISTRIES, metadata_hash, provider_metadata
+from ekido_core.signing import sign_document
 
 from .agent import Agent, AgentConfig, DockerOptions
 from .onchain import Rpc, list_on_chain

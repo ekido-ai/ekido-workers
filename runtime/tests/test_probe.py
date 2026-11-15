@@ -1,7 +1,7 @@
 import unittest
 
-from gpuchain_runtime.probe import probe
-from gpuchain_runtime.synthetic import exec_config, synthetic_spec
+from ekido_runtime.probe import probe
+from ekido_runtime.synthetic import exec_config, synthetic_spec
 
 
 def spec():

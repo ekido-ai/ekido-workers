@@ -5,7 +5,7 @@ from unittest.mock import patch
 from eth_abi import encode
 from eth_utils import keccak
 
-from gpuchain_verifier.trusted_chain import ChainReadError, JOB_TUPLE, _call_rpc, read_chain_context
+from ekido_verifier.trusted_chain import ChainReadError, JOB_TUPLE, _call_rpc, read_chain_context
 
 
 class TrustedChain(unittest.TestCase):
@@ -31,7 +31,7 @@ class TrustedChain(unittest.TestCase):
         raise AssertionError("unexpected RPC method")
 
     def read(self):
-        with patch("gpuchain_verifier.trusted_chain._call_rpc", side_effect=self.rpc):
+        with patch("ekido_verifier.trusted_chain._call_rpc", side_effect=self.rpc):
             return read_chain_context("http://local-rpc", 31337, self.contract, self.job_id, [self.other, self.signer, self.signer])
 
     def test_reads_budget_hashes_and_only_allowlisted_distinct_verifiers(self):
@@ -46,7 +46,7 @@ class TrustedChain(unittest.TestCase):
         with self.assertRaises(ChainReadError): self.read()
 
     def test_rejects_malformed_local_configuration_before_rpc(self):
-        with patch("gpuchain_verifier.trusted_chain._call_rpc") as rpc:
+        with patch("ekido_verifier.trusted_chain._call_rpc") as rpc:
             with self.assertRaises(ChainReadError):
                 read_chain_context("http://local-rpc", 31337, "invalid", self.job_id, [self.signer])
             rpc.assert_not_called()
