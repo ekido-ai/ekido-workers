@@ -33,7 +33,7 @@ Client code is untrusted. The intended design is to run it inside the agent's Do
 - Nothing else from the host is mounted.
 
 **Implementation status:**
-- The untested runtime checks `GPUCHAIN_SANDBOX=1`. An environment variable is not proof of isolation; the process setting it must actually establish and enforce the sandbox.
+- The untested runtime checks `EKIDO_SANDBOX=1`. An environment variable is not proof of isolation; the process setting it must actually establish and enforce the sandbox.
 - The agent's custom-job process-mode refusal, artifact download and sandbox mounts are still to be implemented.
 - The job spec can contain SHA-256 hashes for code and files. End-to-end retrieval, mounting and execution of the agreed artifacts are not yet verified.
 
@@ -46,8 +46,8 @@ Client code is untrusted. The intended design is to run it inside the agent's Do
 
 | # | Part | Status |
 |---|---|---|
-| 1 | Runtime: `custom-python/v1` in `workers/runtime/gpuchain_runtime/custom.py`. Loads `job.py` only inside the sandbox, checks the code and file hashes, then trains through the normal loop | **Written 7 Nov. No tests yet, and never run.** Write unit tests, including the refusal outside the sandbox, and an example `job.py` |
-| 2 | Job spec rules for the new template (code hash, file hashes, user_config) in `gpuchain_core/job_spec.py` | **Written 7 Nov.** Existing tests pass, but there are no new tests for these rules |
+| 1 | Runtime: `custom-python/v1` in `workers/runtime/ekido_runtime/custom.py`. Loads `job.py` only inside the sandbox, checks the code and file hashes, then trains through the normal loop | **Written 7 Nov. No tests yet, and never run.** Write unit tests, including the refusal outside the sandbox, and an example `job.py` |
+| 2 | Job spec rules for the new template (code hash, file hashes, user_config) in `ekido_core/job_spec.py` | **Written 7 Nov.** Existing tests pass, but there are no new tests for these rules |
 | 3 | Agent: download the code and files by hash, mount them read-only into the container, and refuse process mode | To do |
 | 4 | Coordinator: let the client upload code and files (operator API), stored by hash | To do |
 | 5 | Verifier: evaluate custom jobs inside the same sandbox, on the client's own evaluation files | To do. Until then, custom jobs can't pass the quality test |

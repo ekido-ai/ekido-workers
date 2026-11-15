@@ -14,11 +14,11 @@ An independent process that judges checkpoints and signs payouts. It runs apart 
 
 | Path | What |
 |---|---|
-| `gpuchain_verifier/evaluate.py` | Loads a checkpoint, scores it, compares it with the last accepted one, signs the report |
-| `gpuchain_verifier/payout_check.py` | Recomputes payouts and the fee from signed evidence and refuses anything that doesn't match |
-| `gpuchain_verifier/trusted_chain.py` | Reads job facts from a verifier-configured JSON-RPC and escrow address |
-| `gpuchain_verifier/secure_verdict.py` | Fail-closed signing of passing verdicts |
-| `gpuchain_verifier/worker.py` | The worker loop that claims tasks and returns reports |
+| `ekido_verifier/evaluate.py` | Loads a checkpoint, scores it, compares it with the last accepted one, signs the report |
+| `ekido_verifier/payout_check.py` | Recomputes payouts and the fee from signed evidence and refuses anything that doesn't match |
+| `ekido_verifier/trusted_chain.py` | Reads job facts from a verifier-configured JSON-RPC and escrow address |
+| `ekido_verifier/secure_verdict.py` | Fail-closed signing of passing verdicts |
+| `ekido_verifier/worker.py` | The worker loop that claims tasks and returns reports |
 | `tests/test_evaluate.py` | Poisoned, lazy and learning-rate-tampered candidates; wrong evaluation set; tampered reports |
 | `tests/test_payout_check.py` | Forged payouts, recipients, rates, budgets and signatures; untrusted lineage and reports; fee not allowed by the spec |
 | `tests/test_secure_verdict.py` | A wrong payout and an unreachable chain are refused; untrusted chains are refused |
@@ -35,7 +35,7 @@ An independent process that judges checkpoints and signs payouts. It runs apart 
 They run on CPU and need `torch`, `safetensors`, `numpy` and `eth-account`. From this folder:
 
 ```bash
-PYTHONPATH=.:../../packages/gpuchain_core:../../workers/runtime python -m unittest discover -s tests
+PYTHONPATH=.:../../packages/ekido_core:../../workers/runtime python -m unittest discover -s tests
 ```
 
-On Windows PowerShell, set `$env:PYTHONPATH = ".;..\..\packages\gpuchain_core;..\..\workers\runtime"` first.
+On Windows PowerShell, set `$env:PYTHONPATH = ".;..\..\packages\ekido_core;..\..\workers\runtime"` first.

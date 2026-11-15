@@ -1,6 +1,6 @@
-# GPUChain provider kit
+# Ekido provider kit
 
-Rent out an NVIDIA GPU, or a CPU, to the GPUChain test network and earn test USDC for accepted work.
+Rent out an NVIDIA GPU, or a CPU, to the Ekido test network and earn test USDC for accepted work.
 
 ## What's in here
 
