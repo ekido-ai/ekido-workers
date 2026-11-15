@@ -1,18 +1,18 @@
 """llm-lora/v1 on a tiny randomly-built Qwen2 model: no downloads, CPU only, a few seconds."""
 import hashlib
+import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
-try:
+# The suite also runs where the ML stack isn't installed; these tests then skip.
+HAVE_ML = all(importlib.util.find_spec(name) for name in ("torch", "transformers", "peft"))
+if HAVE_ML:
     import torch
-    from peft import LoraConfig  # noqa: F401
     from transformers import AutoModelForCausalLM, Qwen2Config
 
     from ekido_runtime.llm import IGNORE, build_llm, encode
-except ImportError:  # The suite runs without the ML stack in some environments.
-    torch = None
 
 
 class CharTokenizer:
@@ -40,7 +40,7 @@ def spec_for(digest, train_rows, seed=7):
     }
 
 
-@unittest.skipIf(torch is None, "torch, transformers and peft are needed")
+@unittest.skipUnless(HAVE_ML, "torch, transformers and peft are needed")
 class LlmWorkload(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
