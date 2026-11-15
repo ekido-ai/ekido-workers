@@ -23,7 +23,7 @@ from eth_account import Account
 
 from ekido_core.settlement import build_verdict
 from ekido_core.checkpoint_files import checkpoint_files
-from ekido_core.download import save_checkpoint_blob
+from ekido_core.transfer import download_blob
 from ekido_core.canonical import document_hash
 from ekido_core.signing import sign_document, sign_verdict, verify_document
 
@@ -133,9 +133,7 @@ class Verifier:
         self.token = self._call("POST", "/verifier/session", {"message": message, "signature": signature})["token"]
 
     def _download(self, digest: str, target: Path, expected_bytes: int) -> None:
-        request = urllib.request.Request(f"{self.base}/artifacts/{digest}", headers={"Authorization": f"Bearer {self.token}"})
-        with urllib.request.urlopen(request, timeout=300) as response:
-            save_checkpoint_blob(response, target, digest, expected_bytes)
+        download_blob(self.base, self.token, digest, target, expected_bytes, timeout=300)
 
     def _fetch_checkpoint(self, manifest: dict, directory: Path) -> Path:
         files = checkpoint_files(manifest)

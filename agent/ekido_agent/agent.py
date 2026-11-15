@@ -29,7 +29,7 @@ from eth_account import Account
 
 from ekido_core.signing import sign_document
 from ekido_core.checkpoint_files import checkpoint_files
-from ekido_core.download import save_checkpoint_blob
+from ekido_core.transfer import download_blob, upload_blob
 
 from .spawner import CONTAINER_WORKDIR, DockerOptions, Runner, probe_command, reap_orphans
 from .tailer import EventTailer
@@ -219,9 +219,7 @@ class Agent:
     # ------------------------------------------------------------- running
 
     def _download(self, digest: str, target: Path, expected_bytes: int) -> None:
-        request = urllib.request.Request(f"{self.http_base}/artifacts/{digest}", headers={"Authorization": f"Bearer {self.upload_token}"})
-        with urllib.request.urlopen(request, timeout=120) as response:
-            save_checkpoint_blob(response, target, digest, expected_bytes)
+        download_blob(self.http_base, self.upload_token, digest, target, expected_bytes, timeout=120)
 
     def _prepare_resume(self, workdir: Path, manifest: dict) -> None:
         """The runtime validates everything again on load. This only fetches the files."""
@@ -344,14 +342,7 @@ class Agent:
         return Path(runtime_path)
 
     def _upload(self, path: Path, digest: str) -> None:
-        with open(path, "rb") as handle:
-            data = handle.read()
-        request = urllib.request.Request(
-            f"{self.http_base}/artifacts/{digest}", data=data, method="PUT",
-            headers={"Authorization": f"Bearer {self.upload_token}", "Content-Type": "application/octet-stream"},
-        )
-        with urllib.request.urlopen(request, timeout=120):
-            pass
+        upload_blob(self.http_base, self.upload_token, path, digest, timeout=120)
 
     async def upload_checkpoint(self, runner: Runner, event: dict, job_id: str, token: int) -> bool:
         """Blobs first, then the signed manifest, which is the commit. A crash in between leaves nothing committed.
