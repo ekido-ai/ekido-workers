@@ -52,7 +52,7 @@ Client code is untrusted. The intended design is to run it inside the agent's Do
 | 4 | Coordinator: let the client upload code and files (operator API), stored by hash | To do |
 | 5 | Verifier: evaluate custom jobs inside the same sandbox, on the client's own evaluation files | To do. Until then, custom jobs can't pass the quality test |
 | 6 | Dashboard: a "Your own code" option on the New job form, with file pickers | To do |
-| 7 | Economic rule: a client writes the evaluation, so a dishonest client could make the final test fail and get a refund after using compute. The evaluation must be fixed before training (it is, by hash), and providers should see it before accepting. Paying accepted steps on failure (see `docs/payment-incentives-analysis.md`, attack 2) closes this properly | To decide |
+| 7 | Economic rule: a client writes the evaluation, so a dishonest client could make the final test fail and get a refund after using compute. The evaluation must be fixed before training (it is, by hash), and providers should see it before accepting. Paying accepted steps on failure closes this properly | To decide |
 
 ## What it can't do yet
 
