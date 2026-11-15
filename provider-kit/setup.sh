@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GPUChain provider kit, macOS and Linux: a private Python environment in .venv, PyTorch for
+# Ekido provider kit, macOS and Linux: a private Python environment in .venv, PyTorch for
 # your GPU (or the CPU), and the model and dataset jobs use. Nothing is installed system-wide.
 set -euo pipefail
 cd "$(dirname "$0")"

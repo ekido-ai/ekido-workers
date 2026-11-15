@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.payout_terms import workload_hash
-from gpuchain_core.protocol_fee import add_fee, fee_problems, fee_terms, provider_budget
-from gpuchain_core.signing import verify_document
+from ekido_core.canonical import document_hash
+from ekido_core.payout_terms import workload_hash
+from ekido_core.protocol_fee import add_fee, fee_problems, fee_terms, provider_budget
+from ekido_core.signing import verify_document
 
 
 class PayoutEvidenceError(ValueError):

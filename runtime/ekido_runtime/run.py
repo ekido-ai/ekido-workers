@@ -1,6 +1,6 @@
 """Runs one training attempt. The agent starts this and reads its events.
 
-    python -m gpuchain_runtime.run <config.json>
+    python -m ekido_runtime.run <config.json>
 
 Talks to the agent only through files, so the container can run with --network none:
   events.jsonl       appended here, tailed by the agent
@@ -27,8 +27,8 @@ from pathlib import Path
 
 import torch
 
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.gpck import (
+from ekido_core.canonical import document_hash
+from ekido_core.gpck import (
     CheckpointError,
     load_checkpoint,
     manifest_hash,
@@ -36,7 +36,7 @@ from gpuchain_core.gpck import (
     restore_optimizer_state,
     write_checkpoint,
 )
-from gpuchain_core.logical import step_position
+from ekido_core.logical import step_position
 
 from .trainer import canary_loss, canary_matches, create_optimizer, make_scaler, run_logical_step, trainable_named_params
 from .workloads import build_workload

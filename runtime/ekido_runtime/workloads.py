@@ -7,7 +7,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 import torch
-from gpuchain_core.data_identity import check_split, validate_spec_identity
+from ekido_core.data_identity import check_split, validate_spec_identity
 
 from .synthetic import SyntheticClassifier, SyntheticData
 from .trainer import trainable_named_params

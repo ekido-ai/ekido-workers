@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# GPUChain training runtime. One shared image, because disk is limited on the demo laptop.
+# Ekido training runtime. One shared image, because disk is limited on the demo laptop.
 FROM python:3.12-slim
 
 ARG TORCH_VERSION=2.15.0

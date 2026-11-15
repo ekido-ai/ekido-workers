@@ -4,8 +4,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-from gpuchain_agent.workdir import run_directory
-from gpuchain_agent.agent import Agent, AgentConfig
+from ekido_agent.workdir import run_directory
+from ekido_agent.agent import Agent, AgentConfig
 
 
 class WorkdirSafety(unittest.TestCase):

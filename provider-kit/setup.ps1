@@ -1,4 +1,4 @@
-# GPUChain provider kit, Windows: a private Python environment in .venv, PyTorch for your GPU
+# Ekido provider kit, Windows: a private Python environment in .venv, PyTorch for your GPU
 # (or the CPU), and the model and dataset jobs use. Nothing is installed system-wide.
 # Run with:  powershell -ExecutionPolicy Bypass -File .\setup.ps1
 $ErrorActionPreference = "Stop"

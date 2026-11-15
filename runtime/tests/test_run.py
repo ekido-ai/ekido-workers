@@ -12,9 +12,9 @@ from pathlib import Path
 from unittest import mock
 import torch
 
-from gpuchain_core.gpck import manifest_hash, read_manifest
-from gpuchain_runtime.run import EXIT_BAD_CHECKPOINT, EXIT_ERROR, EXIT_LEASE, EXIT_OK, EXIT_OOM, run, scaler_from_manifest, scaler_to_manifest
-from gpuchain_runtime.synthetic import exec_config, synthetic_spec
+from ekido_core.gpck import manifest_hash, read_manifest
+from ekido_runtime.run import EXIT_BAD_CHECKPOINT, EXIT_ERROR, EXIT_LEASE, EXIT_OK, EXIT_OOM, run, scaler_from_manifest, scaler_to_manifest
+from ekido_runtime.synthetic import exec_config, synthetic_spec
 
 
 def spec(total=20, every=5, **extra):
@@ -92,7 +92,7 @@ class RunTest(unittest.TestCase):
         """Exercise the FP16 scaler protocol without requiring a GPU."""
         s = spec(total=10, every=5)
         first, second = self.root / "scaled_first", self.root / "scaled_second"
-        with mock.patch("gpuchain_runtime.run.make_scaler", side_effect=lambda *_: torch.amp.GradScaler("cpu", growth_factor=3.0, backoff_factor=0.25, growth_interval=7)):
+        with mock.patch("ekido_runtime.run.make_scaler", side_effect=lambda *_: torch.amp.GradScaler("cpu", growth_factor=3.0, backoff_factor=0.25, growth_interval=7)):
             self.assertEqual(run(config(first, s, stop_at_step=5)), EXIT_OK)
             checkpoint = self.checkpoints(first)[-1]
             self.assertEqual(checkpoint["manifest"]["scaler"]["growth_factor"], 3.0)
@@ -129,7 +129,7 @@ class RunTest(unittest.TestCase):
         self.assertEqual(run(config(first)), EXIT_OK)
         tip = self.checkpoints(first)[0]["path"]
         second = self.root / "second"
-        with mock.patch("gpuchain_runtime.run.canary_matches", return_value=False):
+        with mock.patch("ekido_runtime.run.canary_matches", return_value=False):
             self.assertEqual(run(config(second, attempt=2, token=2, resume_from=tip)), EXIT_BAD_CHECKPOINT)
         exited = events_of(second)[-1]
         self.assertEqual((exited["reason"], exited["code"]), ("BAD_CHECKPOINT", "CANARY_MISMATCH"))
@@ -207,7 +207,7 @@ class RunTest(unittest.TestCase):
         path = self.root / f"cfg_{time.time_ns()}.json"
         path.write_text(json.dumps(cfg), encoding="utf-8")
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        return subprocess.Popen([sys.executable, "-m", "gpuchain_runtime.run", str(path)], env=env)
+        return subprocess.Popen([sys.executable, "-m", "ekido_runtime.run", str(path)], env=env)
 
     def test_crash_mid_checkpoint_leaves_earlier_checkpoint_usable(self):
         s = spec()

@@ -5,5 +5,5 @@ $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { throw "Run setup.ps1 first." }
 $env:PYTHONPATH = "$PSScriptRoot\core;$PSScriptRoot\agent;$PSScriptRoot\runtime"
 Set-Location $PSScriptRoot
-& $py -m gpuchain_agent.join @args
+& $py -m ekido_agent.join @args
 exit $LASTEXITCODE

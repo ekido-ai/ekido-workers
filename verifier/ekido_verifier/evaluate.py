@@ -15,14 +15,14 @@ from typing import Mapping, Sequence
 import numpy as np
 import torch
 
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.data_identity import check_split, validate_spec_identity
-from gpuchain_core.gpck import CheckpointError, load_checkpoint, manifest_hash
-from gpuchain_core.logical import derive_seed
-from gpuchain_core.quality import compare_paired, decide, macro_f1, margin_for
-from gpuchain_core.signing import sign_document, verify_document
-from gpuchain_runtime.trainer import trainable_named_params
-from gpuchain_runtime.workloads import build_workload
+from ekido_core.canonical import document_hash
+from ekido_core.data_identity import check_split, validate_spec_identity
+from ekido_core.gpck import CheckpointError, load_checkpoint, manifest_hash
+from ekido_core.logical import derive_seed
+from ekido_core.quality import compare_paired, decide, macro_f1, margin_for
+from ekido_core.signing import sign_document, verify_document
+from ekido_runtime.trainer import trainable_named_params
+from ekido_runtime.workloads import build_workload
 
 # Fixed for evaluation: the eval path never uses autocast, dropout or a device-dependent batch size.
 EVAL_EXEC = {"micro_batch": 1, "accumulation": 1, "amp": "none", "grad_checkpointing": False, "attention_impl": "sdpa", "loader_workers": 0}
@@ -55,7 +55,7 @@ def hash_eval_set(inputs: Mapping[str, torch.Tensor], labels: torch.Tensor) -> s
 
 def load_eval_set(spec: dict, examples: int | None = None) -> EvalSet:
     if spec["template"] == "synthetic-linear/v1":
-        from gpuchain_runtime.synthetic import SyntheticData
+        from ekido_runtime.synthetic import SyntheticData
 
         # Same rule as the training data but a separate sample, so it measures generalization.
         source = SyntheticData(size=examples or 512, seed=spec["seed"], split=1)

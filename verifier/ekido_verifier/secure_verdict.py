@@ -8,8 +8,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 from eth_account import Account
-from gpuchain_core.settlement import build_verdict
-from gpuchain_core.signing import sign_verdict
+from ekido_core.settlement import build_verdict
+from ekido_core.signing import sign_verdict
 
 from .payout_check import MAX_REPORTS, PayoutEvidenceError, check_passing_evidence
 from .trusted_chain import read_chain_context

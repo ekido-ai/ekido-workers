@@ -1,7 +1,7 @@
 """Bring-your-own-code jobs (template custom-python/v1). See docs/custom-workloads.md.
 
 The client's job.py is untrusted. It's only ever imported inside the agent's Docker sandbox: no network,
-read-only system, non-root, with memory and process limits. The spawner sets GPUCHAIN_SANDBOX=1 there and
+read-only system, non-root, with memory and process limits. The spawner sets EKIDO_SANDBOX=1 there and
 nowhere else, and this module refuses to run without it. The code's and every file's SHA-256 must match
 the spec, which is fixed on-chain by hash before training, so a provider runs exactly what was agreed.
 """
@@ -17,9 +17,9 @@ from typing import Callable, Sequence
 import torch
 
 TEMPLATE = "custom-python/v1"
-SANDBOX_ENV = "GPUCHAIN_SANDBOX"
-CODE_ENV = "GPUCHAIN_JOB_CODE"  # Path to job.py, mounted read-only.
-FILES_ENV = "GPUCHAIN_JOB_FILES"  # Folder of the client's files, mounted read-only.
+SANDBOX_ENV = "EKIDO_SANDBOX"
+CODE_ENV = "EKIDO_JOB_CODE"  # Path to job.py, mounted read-only.
+FILES_ENV = "EKIDO_JOB_FILES"  # Folder of the client's files, mounted read-only.
 REQUIRED = ("build_model", "dataset_size", "make_batch")
 
 

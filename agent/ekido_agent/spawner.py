@@ -21,7 +21,7 @@ HF_CACHE_VOLUME = "gpuchain_hf_cache"
 
 @dataclass(frozen=True)
 class DockerOptions:
-    image: str = "gpuchain-runtime:latest"
+    image: str = "ekido-runtime:latest"
     memory: str = "6g"
     cpus: str = "6"
     pids_limit: int = 512
@@ -29,7 +29,7 @@ class DockerOptions:
     code_mounts: tuple[tuple[str, str], ...] = ()  # (host path, container path). Development only.
 
 
-def docker_run_args(name: str, host_workdir: str, options: DockerOptions, command: tuple[str, ...] = ("gpuchain_runtime.run", CONTAINER_CONFIG)) -> list[str]:
+def docker_run_args(name: str, host_workdir: str, options: DockerOptions, command: tuple[str, ...] = ("ekido_runtime.run", CONTAINER_CONFIG)) -> list[str]:
     """The full docker command. A test pins the security flags, so they can't be dropped by accident."""
     args = [
         "docker", "run", "--rm",
@@ -45,7 +45,7 @@ def docker_run_args(name: str, host_workdir: str, options: DockerOptions, comman
         "--cpus", options.cpus,
         "-e", "HF_HUB_OFFLINE=1",
         "-e", "HF_DATASETS_OFFLINE=1",
-        "-e", "PYTHONPATH=/app/packages/gpuchain_core:/app/workers/runtime",
+        "-e", "PYTHONPATH=/app/packages/ekido_core:/app/workers/runtime",
         "-v", f"{host_workdir}:{CONTAINER_WORKDIR}",
         "-v", f"{HF_CACHE_VOLUME}:/hf_cache",
     ]
@@ -59,10 +59,10 @@ def docker_run_args(name: str, host_workdir: str, options: DockerOptions, comman
 def probe_command(root: Path, mode: str, options: DockerOptions, suffix: str) -> tuple[list[str], dict | None]:
     """Same isolation as a real run. A fresh process each time, so a failed attempt leaves no memory behind."""
     if mode == "docker":
-        args = docker_run_args(f"gpuchain-probe-{suffix}", str(Path(root).resolve()), options, ("gpuchain_runtime.probe", CONTAINER_CONFIG, f"{CONTAINER_WORKDIR}/result.json"))
+        args = docker_run_args(f"gpuchain-probe-{suffix}", str(Path(root).resolve()), options, ("ekido_runtime.probe", CONTAINER_CONFIG, f"{CONTAINER_WORKDIR}/result.json"))
         return args, None
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
-    return [sys.executable, "-m", "gpuchain_runtime.probe", str(root / "config.json"), str(root / "result.json")], env
+    return [sys.executable, "-m", "ekido_runtime.probe", str(root / "config.json"), str(root / "result.json")], env
 
 
 def container_name(job_id: str, attempt: int) -> str:
@@ -107,7 +107,7 @@ class Runner:
             args = docker_run_args(self.name, str(self.workdir.resolve()), self.docker)
             env = None
         else:
-            args = [sys.executable, "-m", "gpuchain_runtime.run", str(self.workdir / "config.json")]
+            args = [sys.executable, "-m", "ekido_runtime.run", str(self.workdir / "config.json")]
             env = {**os.environ, **(extra_env or {})}
         # The child keeps its own copy of the log handle, so the parent's can be closed right after the start.
         with open(self.workdir / "runtime.log", "ab") as log:

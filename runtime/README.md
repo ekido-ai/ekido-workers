@@ -1,6 +1,6 @@
 # Training runtime
 
-The part of GPUChain that runs on a provider's GPU. This folder holds the training loop, the run entry point that writes and restores checkpoints, and the workloads it can train. The memory probe tries a candidate config for real, so the elastic compiler can approve it.
+The part of Ekido that runs on a provider's GPU. This folder holds the training loop, the run entry point that writes and restores checkpoints, and the workloads it can train. The memory probe tries a candidate config for real, so the elastic compiler can approve it.
 
 ## The step model
 
@@ -18,10 +18,10 @@ What stays fixed, whatever the micro-batch:
 
 | Thing | How it's fixed | Code |
 |---|---|---|
-| Which examples a step sees | A function of the job seed and the step number | `logical_batch_indices` in `gpuchain_core/logical.py` |
+| Which examples a step sees | A function of the job seed and the step number | `logical_batch_indices` in `ekido_core/logical.py` |
 | The gradient | Each micro-batch's mean loss is weighted by its share of the logical batch, so the sum is the full-batch mean | `accumulate_gradients` in `trainer.py` |
 | Gradient clipping | Applied once, after accumulation | `run_logical_step` in `trainer.py` |
-| Learning rate | A function of the step number, so there's no scheduler state to move between machines | `learning_rate` in `gpuchain_core/logical.py` |
+| Learning rate | A function of the step number, so there's no scheduler state to move between machines | `learning_rate` in `ekido_core/logical.py` |
 | Weights and optimizer state | Kept at their base dtype; only autocast (`none`, `fp16`, `bf16`) changes | `amp_dtype`, `make_scaler` in `trainer.py` |
 
 What can differ: floating-point rounding, and dropout masks when the micro-batch size changes, because each micro-batch draws its own mask from a seed of (job seed, step, micro-batch index). The tests measure the rounding difference; they don't claim the runs are bit-identical.
@@ -36,7 +36,7 @@ A checkpoint is a folder with three files:
 | `optimizer.safetensors` | AdamW state per parameter (`exp_avg`, `exp_avg_sq`, `step`), keyed by parameter name. A parameter with no state has no entries |
 | `manifest.json` | Step, job spec hash, exec config, canary loss, environment, the SHA-256 and size of both files, and `parent_manifest_hash` |
 
-Pickle is never used, on save or load. The format lives in `packages/gpuchain_core/gpuchain_core/gpck.py`.
+Pickle is never used, on save or load. The format lives in `packages/ekido_core/ekido_core/gpck.py`.
 
 - **Write order:** tensors first, manifest last, through a temp file and a rename. A crash before the manifest exists leaves nothing that can be picked up as a checkpoint.
 - **Parent link:** each manifest stores the hash of the one before it, so checkpoints form a chain back to the start of the job.
@@ -51,23 +51,23 @@ Signature, fencing and lineage across attempts are checked by the caller, not he
 ## Running one attempt
 
 ```bash
-python -m gpuchain_runtime.run <config.json>
+python -m ekido_runtime.run <config.json>
 ```
 
 The process talks to the provider agent only through files in its work folder: it appends to `events.jsonl`, exits if the agent's `lease` file goes stale, and writes a checkpoint at the next step boundary when `checkpoint_now` appears. Exit codes: 0 finished, 2 lease lost, 3 out of memory, 4 refused checkpoint, 5 other error. Fault injection for the demo and tests (`OOM`, `POISON`, `NO_OP`, `LR_TAMPER`, `CRASH_MID_CHECKPOINT`) is always reported as injected in the events.
 
 ## Fitting a job to a GPU
 
-When a job moves to a different GPU, the elastic compiler (`packages/gpuchain_core/gpuchain_core/compiler.py`) picks a new `micro_batch`, `accumulation` and precision. The job spec never changes, and every candidate keeps `micro_batch x accumulation` equal to the logical batch size.
+When a job moves to a different GPU, the elastic compiler (`packages/ekido_core/ekido_core/compiler.py`) picks a new `micro_batch`, `accumulation` and precision. The job spec never changes, and every candidate keeps `micro_batch x accumulation` equal to the logical batch size.
 
 - **Gates first:** a target that is offline, too old, on the wrong torch version or short of free memory is refused before any probe runs.
-- **Only a real probe approves:** estimates may order the candidates, but a config is accepted only after `gpuchain_runtime.probe` has run it on the target and reported its peak memory and speed. The peak must fit under the capacity with a safety margin, and the measured speed must finish the remaining steps before the deadline.
+- **Only a real probe approves:** estimates may order the candidates, but a config is accepted only after `ekido_runtime.probe` has run it on the target and reported its peak memory and speed. The peak must fit under the capacity with a safety margin, and the measured speed must finish the remaining steps before the deadline.
 - **Precision:** BF16 only where the GPU supports it natively, FP16 on older GPUs such as a T4, none on CPU.
 - **Budget:** if the probe budget runs out, a config that was already proven is kept. With nothing proven, the target is refused.
 - **Record:** `build_adaptation_manifest` lists every changed setting with its reason and the rejected candidates. Its hash, the chosen exec config and the driver version reported by `nvidia-smi` are written into each checkpoint manifest by `run.py`.
 
 ```bash
-python -m gpuchain_runtime.probe <config.json> <result.json>
+python -m ekido_runtime.probe <config.json> <result.json>
 ```
 
 The probe runs as its own process, so a failed attempt can't leave GPU memory stuck. It runs one warm-up step and a few timed steps, then writes `ok`, `oom`, `peak_mem_mib`, `steps_per_s` and the device. Out of memory is a valid answer and still exits 0. On CPU there is no memory cap to enforce, so `peak_mem_mib` is reported as 0.0.
@@ -76,12 +76,12 @@ The probe runs as its own process, so a failed attempt can't leave GPU memory st
 
 | Path | What |
 |---|---|
-| `gpuchain_runtime/trainer.py` | `run_logical_step`, gradient accumulation, AdamW setup, the canary loss used to check a restore |
-| `gpuchain_runtime/run.py` | One training attempt: restore, train, checkpoint, report events |
-| `gpuchain_runtime/probe.py` | Runs a candidate config for a few steps and measures memory and speed |
-| `gpuchain_runtime/workloads.py` | The workload allowlist: `synthetic-linear/v1`, `distilbert-lora-agnews/v1`, `custom-python/v1` |
-| `gpuchain_runtime/custom.py` | Loader for client code, which refuses to run outside the provider's Docker sandbox |
-| `gpuchain_runtime/synthetic.py` | A small classifier and dataset that need no GPU and no downloads |
+| `ekido_runtime/trainer.py` | `run_logical_step`, gradient accumulation, AdamW setup, the canary loss used to check a restore |
+| `ekido_runtime/run.py` | One training attempt: restore, train, checkpoint, report events |
+| `ekido_runtime/probe.py` | Runs a candidate config for a few steps and measures memory and speed |
+| `ekido_runtime/workloads.py` | The workload allowlist: `synthetic-linear/v1`, `distilbert-lora-agnews/v1`, `custom-python/v1` |
+| `ekido_runtime/custom.py` | Loader for client code, which refuses to run outside the provider's Docker sandbox |
+| `ekido_runtime/synthetic.py` | A small classifier and dataset that need no GPU and no downloads |
 | `tests/test_runtime.py` | Gradient invariance, step counting, save and resume, malicious checkpoints, precision modes |
 | `tests/test_probe.py` | Probe on CPU: a working config, a bad config, a workload off the allowlist |
 | `tests/test_run.py` | The run process end to end on CPU: checkpoint chain, kill and resume, refused checkpoints, injected faults, stale lease |
@@ -91,10 +91,10 @@ The probe runs as its own process, so a failed attempt can't leave GPU memory st
 They run on CPU and need `torch`, `safetensors` and `numpy`. From this folder:
 
 ```bash
-PYTHONPATH=.:../../packages/gpuchain_core python -m unittest discover -s tests
+PYTHONPATH=.:../../packages/ekido_core python -m unittest discover -s tests
 ```
 
-On Windows PowerShell, set `$env:PYTHONPATH = ".;..\..\packages\gpuchain_core"` first.
+On Windows PowerShell, set `$env:PYTHONPATH = ".;..\..\packages\ekido_core"` first.
 
 What they check:
 

@@ -1,6 +1,6 @@
 # Connecting a second GPU as a live provider
 
-**Docker cleanup:** Agent startup no longer kills all GPUChain containers by name; those names do not establish ownership. Abandoned training runtimes should stop when their leases expire, but orphaned probe containers may require manual inspection. The GPU experiment's helper cleanup is restricted to its own labelled containers. These changes have not yet been validated with Docker.
+**Docker cleanup:** Agent startup no longer kills all Ekido containers by name; those names do not establish ownership. Abandoned training runtimes should stop when their leases expire, but orphaned probe containers may require manual inspection. The GPU experiment's helper cleanup is restricted to its own labelled containers. These changes have not yet been validated with Docker.
 
 For a teammate's laptop with a different NVIDIA GPU. This is the only way to show recovery on a really different GPU live.
 
@@ -42,7 +42,7 @@ Send the **address** to Piyush. Never send `provider.key`, and don't put it in a
 Set the path once in each new terminal. On Windows, use `;` instead of `:`, and `set` or `$env:` instead of `export`:
 
 ```bash
-export PYTHONPATH=packages/gpuchain_core:workers/agent:workers/runtime
+export PYTHONPATH=packages/ekido_core:workers/agent:workers/runtime
 export PROVIDER_WALLET_KEY=$(cat provider.key)
 ```
 
@@ -65,7 +65,7 @@ The script prints a command for the other machine, then waits.
 Run the printed command. It looks like this:
 
 ```bash
-python -m gpuchain_agent.agent --coordinator ws://THE_IP:8000 --provider-id THE_ID --workdir agent_runs --mode process --device cuda
+python -m ekido_agent.agent --coordinator ws://THE_IP:8000 --provider-id THE_ID --workdir agent_runs --mode process --device cuda
 ```
 
 The script on the demo laptop then says it connected, and runs a real probe. The dashboard shows the provider online, with the GPU its own agent reported.
