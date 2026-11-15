@@ -263,6 +263,11 @@ class Agent:
             if manifest:
                 await asyncio.to_thread(self._prepare_resume, workdir, manifest)
                 run_config["resume_from"] = "resume"
+            spec = run_config.get("spec") or {}
+            if spec.get("template") == "llm-lora/v1":
+                # The customer's rows travel as one blob; the download is checked against its hash and size.
+                dataset = spec["dataset"]
+                await asyncio.to_thread(self._download, dataset["sha256"], workdir / "dataset.jsonl", dataset["bytes"])
             self.runner = Runner(job_id, attempt, workdir, mode=self.config.mode, docker=self.config.docker)
             self.job_id, self.fencing_token = job_id, token
             self.injected_exit = False

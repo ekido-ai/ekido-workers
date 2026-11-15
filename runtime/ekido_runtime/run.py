@@ -266,7 +266,7 @@ def run(config: dict) -> int:
     try:
         events.emit("run.starting", attempt=config["attempt"], fencing_token=config["fencing_token"], device=device, exec=exec_config)
         random.seed(spec["seed"])
-        workload = build_workload(spec, exec_config, device)
+        workload = build_workload(spec, exec_config, device, data_dir=workdir)
         params = list(trainable_named_params(workload.model).values())
         optimizer = create_optimizer(params, spec["optimizer"])
         scaler = make_scaler(exec_config["amp"], device)

@@ -91,13 +91,18 @@ def _build_distilbert(spec: dict, exec_config: dict, device: str, with_data: boo
     return Workload(model, len(dataset), batch_fn, batch_fn(range(CANARY_EXAMPLES)))
 
 
-def build_workload(spec: dict, exec_config: dict, device: str, *, with_data: bool = True) -> Workload:
-    """with_data=False skips the training data, for evaluation, which never touches it."""
+def build_workload(spec: dict, exec_config: dict, device: str, *, with_data: bool = True, data_dir=None) -> Workload:
+    """with_data=False skips the training data, for evaluation, which never touches it. data_dir holds a run's files."""
     template = spec["template"]
     if template == "synthetic-linear/v1":
         return _build_synthetic(spec, exec_config, device)
     if template == "distilbert-lora-agnews/v1":
         return _build_distilbert(spec, exec_config, device, with_data)
+    if template == "llm-lora/v1":
+        from .llm import build_llm
+
+        model, size, batch_fn, canary = build_llm(spec, exec_config, device, data_dir, with_data, canary_examples=CANARY_EXAMPLES)
+        return Workload(model, size, batch_fn, canary)
     if template == "custom-python/v1":
         from .custom import build_custom
 
