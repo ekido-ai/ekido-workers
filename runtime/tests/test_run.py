@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import math
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -183,7 +184,7 @@ class RunTest(unittest.TestCase):
         self.assertEqual(events_of(w)[-1]["reason"], "FINISHED")
         self.assertEqual([c["step"] for c in self.checkpoints(w)], [5, 10, 15, 20])
         losses = [e["loss"] for e in events_of(w) if e["kind"] == "run.progress"]
-        self.assertTrue(all(loss == loss for loss in losses), "losses must stay finite")
+        self.assertTrue(all(math.isfinite(loss) for loss in losses), "losses must stay finite")
 
     def test_diverged_training_reports_plainly(self):
         w = self.root / "lr"

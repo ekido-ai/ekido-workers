@@ -48,7 +48,7 @@ def load_or_create_key(key_file: Path) -> str:
     try:
         os.chmod(key_file, 0o600)  # Owner-only where the OS supports it.
     except OSError:
-        pass
+        pass  # The filesystem does not support chmod; the key file stays as created.
     print(f"Created a new testnet-only provider wallet. Its key is in {key_file}. Back it up, and never share it.")
     return key
 

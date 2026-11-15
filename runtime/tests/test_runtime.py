@@ -1,6 +1,6 @@
 """The correctness tests the whole design rests on. Run on CPU, so they need no GPU.
 
-From the repo root, in the runtime image:
+From the repo root:
   PYTHONPATH=packages/gpuchain_core:workers/runtime python -m unittest discover -s workers/runtime/tests
 """
 
@@ -148,6 +148,47 @@ def flat(model):
     return torch.cat([p.detach().flatten() for p in model.parameters()])
 
 
+class LogicalSteps(unittest.TestCase):
+    spec = synthetic_spec()
+
+    def test_micro_batch_32_and_8x4_reach_the_same_logical_step(self):
+        # 8 x 4 accumulation is still 30 logical steps and 30 optimizer updates, not 120.
+        dtype = torch.float64
+        data = SyntheticData(dtype=dtype)
+        self.assertEqual(exec_config(8)["accumulation"], 4)
+
+        runs = {}
+        for micro in (32, 8):
+            model = make_model(dtype)
+            optimizer = create_optimizer(list(model.parameters()), self.spec["optimizer"])
+            results = train(model, optimizer, data, self.spec, exec_config(micro), 0, 30)
+            updates = {int(state["step"]) for state in optimizer.state.values()}
+            runs[micro] = (results, updates, flat(model))
+
+        full, accumulated = runs[32], runs[8]
+        self.assertEqual([r.step for r in full[0]], [r.step for r in accumulated[0]])
+        self.assertEqual([r.lr for r in full[0]], [r.lr for r in accumulated[0]])
+        self.assertEqual(full[1], {30})
+        self.assertEqual(accumulated[1], {30})
+        # Dropout is off and this is FP64, so changing only the execution plan leaves almost no trace.
+        self.assertLess(float((full[2] - accumulated[2]).abs().max()), 1e-8)
+
+    def test_training_actually_learns(self):
+        data = SyntheticData()
+        model = make_model()
+        optimizer = create_optimizer(list(model.parameters()), self.spec["optimizer"])
+        results = train(model, optimizer, data, self.spec, exec_config(32), 0, 40)
+        self.assertLess(sum(r.loss for r in results[-5:]) / 5, sum(r.loss for r in results[:5]) / 5)
+
+    def test_invalid_exec_config_refused(self):
+        data = SyntheticData()
+        model = make_model()
+        optimizer = create_optimizer(list(model.parameters()), self.spec["optimizer"])
+        bad = dict(exec_config(8), accumulation=3)
+        with self.assertRaises(ValueError):
+            run_logical_step(model, optimizer, data.batch, self.spec, bad, 0, data.size, "cpu")
+
+
 class ResumeCorrectness(unittest.TestCase):
     spec = synthetic_spec()
 
@@ -204,29 +245,13 @@ class ResumeCorrectness(unittest.TestCase):
             # A freshly initialized model is what a silently failed restore would look like.
             self.assertFalse(canary_matches(manifest["canary"]["loss_fp32"], canary_loss(make_model(seed=999), batch, "cpu")))
 
-    def test_training_actually_learns(self):
-        data = SyntheticData()
-        model = make_model()
-        optimizer = create_optimizer(list(model.parameters()), self.spec["optimizer"])
-        results = train(model, optimizer, data, self.spec, exec_config(32), 0, 40)
-        self.assertLess(sum(r.loss for r in results[-5:]) / 5, sum(r.loss for r in results[:5]) / 5)
-
-    def test_invalid_exec_config_refused(self):
-        data = SyntheticData()
-        model = make_model()
-        optimizer = create_optimizer(list(model.parameters()), self.spec["optimizer"])
-        bad = dict(exec_config(8), accumulation=3)
-        with self.assertRaises(ValueError):
-            run_logical_step(model, optimizer, data.batch, self.spec, bad, 0, data.size, "cpu")
-
 
 class OptimizerStateOnSave(unittest.TestCase):
-    def test_a_parameter_with_no_optimizer_state_is_refused_at_save_not_at_restore(self):
+    def test_a_parameter_with_no_optimizer_state_is_stored_as_no_tensors(self):
         model = make_model()
         named = trainable_named_params(model)
         optimizer = torch.optim.AdamW(list(named.values()), lr=1e-3)
-        with self.assertRaisesRegex(CheckpointError, "no optimizer state"):
-            optimizer_state_to_tensors(optimizer, {id(p): n for n, p in named.items()})
+        self.assertEqual(optimizer_state_to_tensors(optimizer, {id(p): n for n, p in named.items()}), {})
 
     def test_partially_initialized_optimizer_state_is_refused(self):
         model = make_model()
@@ -236,6 +261,97 @@ class OptimizerStateOnSave(unittest.TestCase):
         optimizer.state[first] = {"step": torch.tensor(1.0)}
         with self.assertRaises(CheckpointError):
             optimizer_state_to_tensors(optimizer, {id(p): n for n, p in named.items()})
+
+
+class SpareParameter(SyntheticClassifier):
+    """Has a trainable parameter the forward pass never uses, so AdamW never creates state for it."""
+
+    def __init__(self):
+        super().__init__()
+        self.spare = torch.nn.Parameter(torch.zeros(3))
+
+
+def make_spare(seed=7):
+    torch.manual_seed(seed)
+    return SpareParameter()
+
+
+class EmptyOptimizerState(unittest.TestCase):
+    spec = synthetic_spec()
+
+    def save(self, directory, model, optimizer, step):
+        named = trainable_named_params(model)
+        names = {id(p): n for n, p in named.items()}
+        trainable = {n: p.detach().cpu().clone() for n, p in named.items()}
+        manifest = {"logical_step": step, "immutable_hash": document_hash(self.spec), "parent_manifest_hash": None}
+        return write_checkpoint(Path(directory), trainable, optimizer_state_to_tensors(optimizer, names), manifest)
+
+    def restore(self, directory):
+        # Deliberately a different initial seed: every weight must come from the checkpoint.
+        model = make_spare(seed=999)
+        named = trainable_named_params(model)
+        shapes = {n: tuple(p.shape) for n, p in named.items()}
+        manifest, trainable, optimizer_tensors = load_checkpoint(directory, shapes, expected_immutable_hash=document_hash(self.spec))
+        with torch.no_grad():
+            for name, param in named.items():
+                param.copy_(trainable[name])
+        optimizer = create_optimizer(list(named.values()), self.spec["optimizer"])
+        restore_optimizer_state(optimizer, named, optimizer_tensors)
+        return model, optimizer, manifest
+
+    def test_save_then_restore_when_a_parameter_never_got_a_gradient(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = SyntheticData()
+            cfg = exec_config(8)
+
+            control = make_spare()
+            control_opt = create_optimizer(list(control.parameters()), self.spec["optimizer"])
+            train(control, control_opt, data, self.spec, cfg, 0, 20)
+
+            first = make_spare()
+            first_opt = create_optimizer(list(first.parameters()), self.spec["optimizer"])
+            train(first, first_opt, data, self.spec, cfg, 0, 10)
+            self.assertNotIn(first.spare, first_opt.state)
+            self.save(tmp, first, first_opt, 10)
+
+            resumed, resumed_opt, manifest = self.restore(tmp)
+            self.assertNotIn(resumed.spare, resumed_opt.state)
+            self.assertEqual(len(resumed_opt.state), len(first_opt.state))
+            train(resumed, resumed_opt, data, self.spec, cfg, manifest["logical_step"], 20)
+            self.assertTrue(torch.equal(flat(control), flat(resumed)))
+
+    def test_checkpoint_before_the_first_step_saves_and_restores(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model = make_spare()
+            optimizer = create_optimizer(list(model.parameters()), self.spec["optimizer"])
+            self.save(tmp, model, optimizer, 0)
+            resumed, resumed_opt, _ = self.restore(tmp)
+            self.assertEqual(len(resumed_opt.state), 0)
+            self.assertTrue(torch.equal(flat(model), flat(resumed)))
+
+    def test_state_cut_down_to_some_fields_is_refused_on_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = SyntheticData()
+            model = make_spare()
+            optimizer = create_optimizer(list(model.parameters()), self.spec["optimizer"])
+            train(model, optimizer, data, self.spec, exec_config(8), 0, 2)
+            manifest = self.save(tmp, model, optimizer, 2)
+
+            path = Path(tmp) / OPTIMIZER_FILE
+            names = {id(p): n for n, p in trainable_named_params(model).items()}
+            tensors = optimizer_state_to_tensors(optimizer, names)
+            dropped = next(name for name in tensors if name.endswith(".exp_avg"))
+            del tensors[dropped]
+            save_file(tensors, str(path))
+            from gpuchain_core.gpck import sha256_file
+
+            manifest["files"][OPTIMIZER_FILE] = {"sha256": sha256_file(path), "bytes": path.stat().st_size}
+            (Path(tmp) / "manifest.json").write_text(json.dumps(manifest))
+
+            shapes = {n: tuple(p.shape) for n, p in trainable_named_params(model).items()}
+            with self.assertRaises(CheckpointError) as caught:
+                load_checkpoint(tmp, shapes, expected_immutable_hash=document_hash(self.spec))
+            self.assertEqual(caught.exception.code, "MALFORMED_CHECKPOINT")
 
 
 class MaliciousCheckpoints(unittest.TestCase):
