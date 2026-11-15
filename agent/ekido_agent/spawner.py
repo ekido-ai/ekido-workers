@@ -66,7 +66,7 @@ def probe_command(root: Path, mode: str, options: DockerOptions, suffix: str) ->
 
 
 def container_name(job_id: str, attempt: int) -> str:
-    return f"gpuchain-run-{job_id[:12]}-{attempt}"
+    return f"ekido-run-{job_id[:12]}-{attempt}"
 
 
 class Runner:
