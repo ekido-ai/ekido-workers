@@ -1,4 +1,4 @@
-transformers==5.22.1
+transformers==5.23.0
 peft==0.21.3
 safetensors
 datasets
