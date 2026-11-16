@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: agent
+            dir: agent
+            path: ".:../runtime"
+          - suite: runtime
+            dir: runtime
+            path: "."
+          - suite: verifier
+            dir: verifier
+            path: ".:../runtime"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install safetensors numpy eth-account httpx websockets "transformers==5.22.1" "peft==0.21.2" "ekido-core @ git+https://github.com/ekido-ai/Ekido@v0.4.0#subdirectory=packages/ekido_core"
+      - name: Run tests
+        working-directory: ${{ matrix.dir }}
+        env:
+          PYTHONPATH: ${{ matrix.path }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m unittest discover -s tests

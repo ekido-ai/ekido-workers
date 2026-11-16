@@ -1,0 +1,14 @@
+name: Gate
+
+# No report, no merge, and a conventional PR title: the same rules in every Ekido repo, defined once in ekido-core.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate:
+    uses: ekido-ai/Ekido/.github/workflows/gate.yml@main
