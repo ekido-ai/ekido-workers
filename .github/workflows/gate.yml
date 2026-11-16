@@ -11,4 +11,4 @@ permissions:
 
 jobs:
   gate:
-    uses: ekido-ai/Ekido/.github/workflows/gate.yml@main
+    uses: ekido-ai/ekido-core/.github/workflows/gate.yml@main
