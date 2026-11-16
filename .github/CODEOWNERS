@@ -1,0 +1,5 @@
+# Piyush reviews everything in this repo except tests and data the team writes.
+*                @piyushgargog
+/tests/
+/e2e/
+/experiments/
