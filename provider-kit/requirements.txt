@@ -1,5 +1,5 @@
 transformers==5.22.1
-peft==0.21.2
+peft==0.21.3
 safetensors
 datasets
 numpy
