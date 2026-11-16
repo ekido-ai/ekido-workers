@@ -147,7 +147,13 @@ class Verifier:
         key = document_hash(spec)
         if key not in self._eval_sets:
             started = time.perf_counter()
-            self._eval_sets[key] = load_eval_set(spec, self.eval_examples)
+            if spec.get("template") == "llm-lora/v1":
+                # The customer's dataset is one blob in the artifact store; the download is checked against its hash.
+                with tempfile.TemporaryDirectory(prefix="dataset_") as tmp:
+                    self._download(spec["dataset"]["sha256"], Path(tmp) / "dataset.jsonl", spec["dataset"]["bytes"])
+                    self._eval_sets[key] = load_eval_set(spec, data_dir=Path(tmp))
+            else:
+                self._eval_sets[key] = load_eval_set(spec, self.eval_examples)
             log.info("evaluation set ready in %.1fs", time.perf_counter() - started)
         return self._eval_sets[key]
 

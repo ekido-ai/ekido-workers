@@ -76,6 +76,8 @@ def build_llm(spec: dict, exec_config: dict, device: str, data_dir: Path | None,
         base,
         LoraConfig(task_type=TaskType.CAUSAL_LM, r=lora["r"], lora_alpha=lora["alpha"], lora_dropout=lora["dropout"], target_modules=lora["target_modules"]),
     ).to(device)
+    # Evaluation generates text, so it needs the tokenizer that belongs to these weights.
+    model.ekido_tokenizer = tokenizer
     if exec_config.get("grad_checkpointing"):
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         model.enable_input_require_grads()
@@ -94,3 +96,21 @@ def build_llm(spec: dict, exec_config: dict, device: str, data_dir: Path | None,
         return {k: v[index] for k, v in encoded.items()}
 
     return model, len(rows), batch_fn, batch_fn(range(min(canary_examples, len(rows))))
+
+
+@torch.no_grad()
+def generate_answers(model, tokenizer, prompts: Sequence[str], *, max_new_tokens: int, max_prompt_tokens: int, device: str) -> list[str]:
+    """The model's answer to each prompt. Greedy and one prompt at a time, so the same weights always give the
+    same text, whatever the device or batch size."""
+    model.eval()
+    pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+    answers = []
+    for prompt in prompts:
+        ids = tokenizer(prompt, add_special_tokens=False)["input_ids"][-max_prompt_tokens:]
+        inputs = torch.tensor([ids], device=device)
+        output = model.generate(
+            input_ids=inputs, attention_mask=torch.ones_like(inputs), max_new_tokens=max_new_tokens, do_sample=False,
+            eos_token_id=tokenizer.eos_token_id, pad_token_id=pad,
+        )
+        answers.append(tokenizer.decode(output[0, len(ids):].tolist(), skip_special_tokens=True))
+    return answers

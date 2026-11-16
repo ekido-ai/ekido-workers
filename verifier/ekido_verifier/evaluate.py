@@ -35,6 +35,11 @@ class EvalSet:
     inputs: Mapping[str, torch.Tensor]
     labels: torch.Tensor
     hash: str
+    # llm-lora/v1 only: the test rows as prompts and reference answers, judged by the recipe's pass rule.
+    recipe_id: str | None = None
+    prompts: tuple[str, ...] = ()
+    references: tuple[str, ...] = ()
+    max_prompt_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -42,6 +47,7 @@ class Evaluation:
     correct: np.ndarray
     predictions: np.ndarray
     loss: float
+    score: float | None = None  # llm-lora/v1: the recipe metric's mean, reported next to the pass rate.
 
 
 def hash_eval_set(inputs: Mapping[str, torch.Tensor], labels: torch.Tensor) -> str:
@@ -53,7 +59,25 @@ def hash_eval_set(inputs: Mapping[str, torch.Tensor], labels: torch.Tensor) -> s
     return digest.hexdigest()
 
 
-def load_eval_set(spec: dict, examples: int | None = None) -> EvalSet:
+def load_eval_set(spec: dict, examples: int | None = None, data_dir: Path | None = None) -> EvalSet:
+    if spec["template"] == "llm-lora/v1":
+        from ekido_core.recipes import eval_set_hash, recipe
+        from ekido_runtime.llm import load_rows
+
+        if data_dir is None:
+            raise ValueError("llm-lora/v1 needs the folder that holds dataset.jsonl")
+        # The customer's own test rows, never generated ones. Every row is used: the policy fixes this exact set.
+        rows = load_rows(Path(data_dir) / "dataset.jsonl", spec["dataset"]["sha256"], split="test")
+        if len(rows) != spec["dataset"]["test_rows"]:
+            raise ValueError(f"dataset has {len(rows)} test rows, the spec says {spec['dataset']['test_rows']}")
+        r = recipe(spec["recipe_id"])
+        source, target = r.columns
+        return EvalSet(
+            {}, torch.zeros(len(rows)), eval_set_hash(r.recipe_id, rows), recipe_id=r.recipe_id,
+            prompts=tuple(r.prompt(row[source]) for row in rows), references=tuple(row[target] for row in rows),
+            max_prompt_tokens=max(1, spec["max_seq_length"] - r.max_answer_tokens),
+        )
+
     if spec["template"] == "synthetic-linear/v1":
         from ekido_runtime.synthetic import SyntheticData
 
@@ -86,6 +110,8 @@ def load_eval_set(spec: dict, examples: int | None = None) -> EvalSet:
 @torch.no_grad()
 def predict(model: torch.nn.Module, eval_set: EvalSet, device: str, batch_size: int = 64) -> Evaluation:
     """FP32, no autocast and no dropout, always in the same order."""
+    if eval_set.recipe_id is not None:
+        return _predict_text(model, eval_set, device)
     model.eval()
     predictions, losses = [], []
     n = eval_set.labels.shape[0]
@@ -97,6 +123,18 @@ def predict(model: torch.nn.Module, eval_set: EvalSet, device: str, batch_size: 
         losses.append(float(output.loss.item()) * labels.shape[0])
     predicted = np.concatenate(predictions)
     return Evaluation(correct=predicted == eval_set.labels.numpy(), predictions=predicted, loss=sum(losses) / n)
+
+
+def _predict_text(model: torch.nn.Module, eval_set: EvalSet, device: str) -> Evaluation:
+    """Generates an answer per test prompt and marks each one passed or failed under the recipe's rule."""
+    from ekido_core.recipes import passes, recipe, score
+    from ekido_runtime.llm import generate_answers
+
+    r = recipe(eval_set.recipe_id)
+    answers = generate_answers(model, model.ekido_tokenizer, eval_set.prompts, max_new_tokens=r.max_answer_tokens, max_prompt_tokens=eval_set.max_prompt_tokens, device=device)
+    passed = np.array([passes(r.recipe_id, a, ref) for a, ref in zip(answers, eval_set.references)], dtype=bool)
+    mean = score(r.recipe_id, answers, list(eval_set.references))
+    return Evaluation(correct=passed, predictions=np.array(answers, dtype=object), loss=1.0 - mean, score=mean)
 
 
 def load_model(spec: dict, checkpoint_dir: Path | None, device: str) -> tuple[torch.nn.Module, dict | None, dict[str, torch.Tensor] | None]:
@@ -196,7 +234,14 @@ def evaluate_checkpoint(
         no_nan_inf=True,  # load_checkpoint already refused non-finite tensors.
         weights_changed=weights_changed,
     )
-    labels = eval_set.labels.numpy().tolist()
+    if eval_set.recipe_id is not None:
+        from ekido_core.recipes import recipe
+
+        # "accuracy" is the share of test examples that passed; "score" is the recipe metric's mean.
+        metrics = {"accuracy": comparison.candidate_accuracy, "score": candidate.score, "metric": recipe(eval_set.recipe_id).metric}
+    else:
+        labels = eval_set.labels.numpy().tolist()
+        metrics = {"accuracy": comparison.candidate_accuracy, "macro_f1": macro_f1(candidate.predictions.tolist(), labels), "loss": candidate.loss}
     return {
         "schema_version": 1,
         "job_id": job_id,
@@ -207,7 +252,7 @@ def evaluate_checkpoint(
         "eval_version_hash": policy["eval_version_hash"],
         "is_final": is_final,
         "n_examples": comparison.n,
-        "metrics": {"accuracy": comparison.candidate_accuracy, "macro_f1": macro_f1(candidate.predictions.tolist(), labels), "loss": candidate.loss},
+        "metrics": metrics,
         "comparison": {
             "reference_accuracy": comparison.reference_accuracy,
             "difference": comparison.difference,
