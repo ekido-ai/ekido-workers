@@ -23,6 +23,25 @@ from ekido_core.recipes import recipe
 IGNORE = -100
 
 
+def load_tokenizer(model_id: str, revision: str | None = None):
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained(model_id, revision=revision)
+
+
+def load_model(model_id: str, revision: str | None = None, *, device: str = 'cpu',
+               dtype: torch.dtype = torch.float32, load_in_4bit: bool = False):
+    from transformers import AutoModelForCausalLM
+    if load_in_4bit:
+        from transformers import BitsAndBytesConfig
+        if not device.startswith('cuda'):
+            raise ValueError('4-bit teacher loading requires a CUDA device')
+        compute_dtype = torch.bfloat16 if torch.cuda.get_device_capability(device)[0] >= 8 else torch.float16
+        config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=compute_dtype)
+        return AutoModelForCausalLM.from_pretrained(model_id, revision=revision,
+                                                     quantization_config=config, device_map=device)
+    return AutoModelForCausalLM.from_pretrained(model_id, revision=revision, torch_dtype=dtype).to(device)
+
+
 def load_rows(path: Path, sha256: str, split: str = "train") -> list[dict]:
     data = Path(path).read_bytes()
     if hashlib.sha256(data).hexdigest() != sha256:

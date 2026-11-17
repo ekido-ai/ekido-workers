@@ -86,6 +86,24 @@ The probe runs as its own process, so a failed attempt can't leave GPU memory st
 | `tests/test_probe.py` | Probe on CPU: a working config, a bad config, a workload off the allowlist |
 | `tests/test_run.py` | The run process end to end on CPU: checkpoint chain, kill and resume, refused checkpoints, injected faults, stale lease |
 
+## Standalone LLM tools
+
+The `train`, `distill` and `export` modules can also be run as standalone commands for
+local experiments. They do not yet connect distillation or export to the provider agent
+or the staging inference service. Training needs a validated job spec and a JSONL dataset
+containing the train and test splits; the dataset hash and counts must match the spec.
+
+```bash
+python -m ekido_runtime.train --spec job.json --dataset dataset.jsonl --out runs/job
+python -m ekido_runtime.distill --recipe review-sentiment --seed seeds.jsonl --test test.jsonl --out runs/distill --student Qwen/Qwen2.5-0.5B-Instruct
+python -m ekido_runtime.export --spec job.json --checkpoint runs/job/checkpoints/step-30 --out export/model --gguf --quantize Q4_K_M Q8_0 --llama-cpp /path/to/llama.cpp
+```
+
+GGUF conversion requires a separately installed llama.cpp checkout and built quantizer.
+For a 7B teacher on a T4, distillation supports `--teacher-4bit` and requires
+bitsandbytes. Teacher outputs and their generation settings are written under the output
+directory; test inputs are excluded from generated training rows.
+
 ## Tests
 
 They run on CPU and need `torch`, `safetensors` and `numpy`. From this folder:
