@@ -27,10 +27,17 @@ from ekido_core.transfer import download_blob
 from ekido_core.canonical import document_hash
 from ekido_core.signing import sign_document, sign_verdict, verify_document
 
-from .evaluate import evaluate_checkpoint, load_eval_set, sign_report
+from .evaluate import base_cache_key, evaluate_checkpoint, load_eval_set, sign_report
 from .secure_verdict import sign_checked_verdict
 
 log = logging.getLogger("gpuchain.verifier")
+
+
+def _trim_checkpoint_cache(cache: dict, limit: int = 8) -> None:
+    """Bound checkpoint entries without discarding baselines for unfinished jobs."""
+    checkpoints = [key for key in cache if not str(key[1]).startswith('baseline:')]
+    for key in checkpoints[:-limit] if limit else checkpoints:
+        cache.pop(key, None)
 
 
 def verdict_from_inputs(inputs: dict) -> dict:
@@ -97,7 +104,8 @@ class Verifier:
             finally:
                 if os.path.exists(temporary):
                     os.unlink(temporary)
-        self.signed_pass.add(report_key)
+        if report['verdict'] == 'PASS':
+            self.signed_pass.add(report_key)
         self.final_reports[report_key] = document_hash(report)
         self.final_context[report_key] = context
 
@@ -109,7 +117,7 @@ class Verifier:
             with (self.state_dir / name).open(encoding="utf-8") as source:
                 saved = json.load(source)
             report, spec, policy = saved["report"], saved["spec"], saved["policy"]
-            if not verify_document(saved, saved["signature"], self.address) or (report["job_id"], report["checkpoint_hash"]) != report_key or report["is_final"] is not True or report["verdict"] != "PASS" or report["signer"].lower() != self.address.lower() or report["policy_hash"] != document_hash(policy) or not verify_document(report, report["signature"], self.address):
+            if not verify_document(saved, saved["signature"], self.address) or (report["job_id"], report["checkpoint_hash"]) != report_key or report["is_final"] is not True or report["verdict"] not in ("PASS", "FAIL") or report["signer"].lower() != self.address.lower() or report["policy_hash"] != document_hash(policy) or not verify_document(report, report["signature"], self.address):
                 raise ValueError("invalid saved final report")
             self.final_reports[report_key] = document_hash(report)
             self.final_context[report_key] = (spec, policy)
@@ -177,12 +185,12 @@ class Verifier:
                 reference_cache=self._reference_cache,
             )
             # A candidate often becomes the next reference, so keep only recent entries.
-            while len(self._reference_cache) > 8:
-                self._reference_cache.pop(next(iter(self._reference_cache)))
+            _trim_checkpoint_cache(self._reference_cache)
             log.info("step %s: %s %s in %.1fs", task["manifest"].get("logical_step"), report["verdict"], report["reasons"], time.perf_counter() - started)
             signed_report = sign_report(report, self.key)
-            if report["verdict"] == "PASS" and report["is_final"]:
+            if report["is_final"]:
                 self._record_final_report(signed_report, task["spec"], task["policy"])
+                self._reference_cache.pop(base_cache_key(task['job_id'], task['spec'], report['eval_set_hash']), None)
             return signed_report
 
     def sign_verdict_task(self, inputs: dict) -> str | None:
@@ -191,7 +199,7 @@ class Verifier:
             if not (self.rpc_url and self.chain_id and self.escrow_address):
                 log.warning("refusing verdict: verifier has no trusted chain configuration")
                 return None
-            report_key = (inputs.get("job_id"), inputs.get("final_checkpoint_hash"))
+            report_key = (inputs.get("job_id"), inputs.get("final_checkpoint_hash") if inputs.get("passed") is True else inputs.get("failure_checkpoint_hash"))
             if report_key not in self.final_context:
                 self._restore_final_report(report_key)
             context = self.final_context.get(report_key)

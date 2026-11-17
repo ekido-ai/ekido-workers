@@ -50,6 +50,10 @@ class Evaluation:
     score: float | None = None  # llm-lora/v1: the recipe metric's mean, reported next to the pass rate.
 
 
+def base_cache_key(job_id: str, spec: dict, eval_hash: str) -> tuple[str, str]:
+    return eval_hash, f"baseline:{job_id}:{document_hash(spec)}"
+
+
 def hash_eval_set(inputs: Mapping[str, torch.Tensor], labels: torch.Tensor) -> str:
     digest = hashlib.sha256()
     for name in sorted(inputs):
@@ -194,15 +198,26 @@ def evaluate_checkpoint(
     if policy["eval_set_hash"] != eval_set.hash:
         raise ValueError("this evaluation set isn't the one fixed in the policy, so results wouldn't be comparable")
 
-    reference_model, reference_manifest, reference_weights = load_model(spec, reference_dir, device)
-    reference_hash = manifest_hash(reference_manifest) if reference_manifest else None
-    cache_key = (eval_set.hash, reference_hash or f"baseline:{document_hash(spec)}")
-    reference_eval = reference_cache.get(cache_key) if reference_cache is not None else None
-    if reference_eval is None:
-        reference_eval = predict(reference_model, eval_set, device)
-        if reference_cache is not None:
-            reference_cache[cache_key] = reference_eval
-    del reference_model
+    baseline_key = base_cache_key(job_id, spec, eval_set.hash)
+    if reference_dir is None:
+        reference_hash, reference_weights = None, None
+        reference_eval = reference_cache.get(baseline_key) if reference_cache is not None else None
+        if reference_eval is None:
+            reference_model, _, _ = load_model(spec, None, device)
+            reference_eval = predict(reference_model, eval_set, device)
+            del reference_model
+            if reference_cache is not None:
+                reference_cache[baseline_key] = reference_eval
+    else:
+        reference_model, reference_manifest, reference_weights = load_model(spec, reference_dir, device)
+        reference_hash = manifest_hash(reference_manifest)
+        cache_key = (eval_set.hash, reference_hash)
+        reference_eval = reference_cache.get(cache_key) if reference_cache is not None else None
+        if reference_eval is None:
+            reference_eval = predict(reference_model, eval_set, device)
+            if reference_cache is not None:
+                reference_cache[cache_key] = reference_eval
+        del reference_model
 
     try:
         model, manifest, weights = load_model(spec, Path(checkpoint_dir), device)
@@ -224,16 +239,40 @@ def evaluate_checkpoint(
         reference_cache[(eval_set.hash, checkpoint_hash)] = candidate
     seed = derive_seed("quality", job_id, checkpoint_hash)
     comparison = compare_paired(candidate.correct.tolist(), reference_eval.correct.tolist(), confidence=policy["confidence"], resamples=policy["bootstrap_resamples"], seed=seed)
+    min_absolute = policy["min_absolute"]
+    if eval_set.recipe_id is not None:
+        from ekido_core.recipes import recipe
+        min_absolute = max(min_absolute, recipe(eval_set.recipe_id).floor)
     decision = decide(
         comparison,
         margin=margin_for(policy, is_final),
-        min_absolute=policy["min_absolute"],
+        min_absolute=min_absolute,
         is_final=is_final,
         signature_valid=signature_valid,
         lineage_valid=lineage_valid,
         no_nan_inf=True,  # load_checkpoint already refused non-finite tensors.
         weights_changed=weights_changed,
     )
+    base_comparison = None
+    if is_final and eval_set.recipe_id is not None:
+        if reference_dir is None:
+            base_eval = reference_eval
+        else:
+            base_eval = reference_cache.get(baseline_key) if reference_cache is not None else None
+            if base_eval is None:
+                base_model, _, _ = load_model(spec, None, device)
+                base_eval = predict(base_model, eval_set, device)
+                del base_model
+                if reference_cache is not None:
+                    reference_cache[baseline_key] = base_eval
+        compared = compare_paired(candidate.correct.tolist(), base_eval.correct.tolist(),
+                                  confidence=policy["confidence"], resamples=policy["bootstrap_resamples"], seed=seed)
+        base_comparison = {"reference_accuracy": compared.reference_accuracy, "difference": compared.difference,
+                           "ci_lower": compared.ci_lower, "margin": margin_for(policy, True),
+                           "confidence": compared.confidence, "resamples": compared.resamples}
+        if compared.difference <= 0 or compared.ci_lower < -margin_for(policy, True):
+            from ekido_core.quality import Decision
+            decision = Decision("FAIL", [*decision.reasons, "BASE_MODEL_NOT_BEATEN"])
     if eval_set.recipe_id is not None:
         from ekido_core.recipes import recipe
 
@@ -262,6 +301,7 @@ def evaluate_checkpoint(
             "resamples": comparison.resamples,
             "mcnemar_p": comparison.mcnemar_p,
         },
+        "base_comparison": base_comparison,
         "correctness_hash": hashlib.sha256(candidate.correct.astype(np.uint8).tobytes()).hexdigest(),
         "checks": {"signature_valid": signature_valid, "lineage_valid": lineage_valid, "no_nan_inf": True, "weights_changed": weights_changed},
         "verdict": decision.verdict,
