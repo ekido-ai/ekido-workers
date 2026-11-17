@@ -42,6 +42,59 @@ class SecureVerdict(unittest.TestCase):
         self.fixture.inputs["passed"] = False
         with self.assertRaises(PayoutEvidenceError): self.sign()
 
+    def failing_inputs(self):
+        f = self.fixture
+        failure_hash = f.inputs['final_checkpoint_hash']
+        v1_key, v2_key = f.keys[2:4]
+        reports = []
+        for report, key in zip(f.inputs['reports'], (v1_key, v2_key)):
+            body = {k: v for k, v in report.items() if k != 'signature'}
+            body['verdict'] = 'FAIL'
+            body['reasons'] = ['BASE_MODEL_NOT_BEATEN']
+            reports.append(test_payout_check.signed(body, key))
+        f.inputs.update(passed=False, final_checkpoint_hash=None, failure_checkpoint_hash=failure_hash,
+                        lineage=[], payouts={}, refund='5', reports=reports)
+        from ekido_core.canonical import document_hash
+        f.own_reports = {('job', failure_hash): document_hash(reports[0])}
+        return f
+
+    def test_signs_full_refund_only_for_own_signed_failure_quorum(self):
+        f = self.failing_inputs()
+        with patch('ekido_verifier.secure_verdict.read_chain_context', return_value=f.chain):
+            signature = self.sign()
+        self.assertEqual(recover_verdict_signer(verdict_from_inputs(f.inputs), 31337, f.chain['contract'], signature).lower(), f.v1)
+
+    def test_refuses_forged_or_incomplete_refund_evidence(self):
+        for change in ('refund', 'payout', 'binding', 'duplicate', 'bad_signature', 'missing_own', 'wrong_job', 'wrong_checkpoint', 'non_quality_failure'):
+            with self.subTest(change=change):
+                self.setUp()
+                f = self.failing_inputs()
+                if change == 'refund': f.inputs['refund'] = '4'
+                if change == 'payout': f.inputs['payouts'] = {f.wallet: '1'}
+                if change == 'binding': f.inputs['job_binding']['signature'] = '0x00'
+                if change == 'duplicate': f.inputs['reports'][1] = f.inputs['reports'][0]
+                if change == 'bad_signature': f.inputs['reports'][1]['signature'] = '0x00'
+                if change == 'missing_own': f.own_reports = {}
+                if change == 'wrong_job': f.inputs['job_id'] = 'another-job'
+                if change == 'wrong_checkpoint': f.inputs['failure_checkpoint_hash'] = 'a' * 64
+                if change == 'non_quality_failure':
+                    body = {k: v for k, v in f.inputs['reports'][1].items() if k != 'signature'}
+                    body['reasons'] = ['INVALID_SIGNATURE']
+                    f.inputs['reports'][1] = test_payout_check.signed(body, f.keys[3])
+                with patch('ekido_verifier.secure_verdict.read_chain_context', return_value=f.chain):
+                    with self.assertRaises(PayoutEvidenceError): self.sign()
+
+    def test_failed_report_context_survives_restart(self):
+        f = self.failing_inputs()
+        with tempfile.TemporaryDirectory() as directory:
+            options = dict(rpc_url='http://independent-rpc', chain_id=31337,
+                           escrow_address=f.chain['contract'], state_dir=directory)
+            worker = Verifier('http://coordinator', self.key, 'cpu', 512, **options)
+            worker._record_final_report(f.inputs['reports'][0], f.spec, f.policy)
+            restarted = Verifier('http://coordinator', self.key, 'cpu', 512, **options)
+            with patch('ekido_verifier.secure_verdict.read_chain_context', return_value=f.chain):
+                self.assertIsNotNone(restarted.sign_verdict_task(f.inputs))
+
     def test_live_worker_requires_own_report_and_checks_payout(self):
         f = self.fixture
         worker = Verifier("http://coordinator", self.key, "cpu", 512, rpc_url="http://independent-rpc", chain_id=31337, escrow_address=f.chain["contract"])

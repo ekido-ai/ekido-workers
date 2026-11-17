@@ -28,6 +28,48 @@ def _require(condition: bool, message: str) -> None:
         raise PayoutEvidenceError(message)
 
 
+def check_failed_evidence(inputs: dict, *, spec: dict, policy: dict, chain: dict,
+                          own_address: str, own_final_reports: dict) -> None:
+    """Check a full refund against the funded job and a quorum of signed final failures."""
+    try:
+        _require(inputs['passed'] is False, 'expected a failing verdict')
+        _require(inputs['chain_id'] == chain['chain_id'] and inputs['contract'].lower() == chain['contract'].lower(), 'wrong signing domain')
+        _require(inputs['onchain_job_id'].lower() == chain['onchain_job_id'].lower(), 'wrong on-chain job')
+        _require(document_hash(spec) == chain['spec_hash'].removeprefix('0x').lower(), 'spec does not match funded job')
+        _require(document_hash(policy) == chain['policy_hash'].removeprefix('0x').lower(), 'policy does not match funded job')
+        budget = Decimal(str(chain['budget']))
+        _require(budget.is_finite() and budget > 0 and Decimal(str(inputs['budget'])) == budget and Decimal(str(inputs['refund'])) == budget, 'refund must equal the funded budget')
+        _require(inputs['payouts'] == {} and inputs['lineage'] == [] and inputs['final_checkpoint_hash'] is None, 'failed verdict cannot pay providers or accept a checkpoint')
+        binding = inputs['job_binding']
+        _require(binding['kind'] == 'gpuchain.job_binding.v1' and binding['job_id'] == inputs['job_id'] and binding['onchain_job_id'].lower() == chain['onchain_job_id'].lower() and binding['chain_id'] == chain['chain_id'] and binding['contract'].lower() == chain['contract'].lower(), 'client job binding does not match')
+        _require(binding['spec_hash'] == document_hash(spec) and binding['policy_hash'] == document_hash(policy) and Decimal(str(binding['budget'])) == budget, 'client job binding has different terms')
+        _require(verify_document(binding, binding['signature'], chain['client']), 'invalid client job binding')
+        failure_hash = inputs['failure_checkpoint_hash']
+        _require(isinstance(failure_hash, str) and len(failure_hash) == 64 and all(c in '0123456789abcdef' for c in failure_hash), 'invalid failed checkpoint hash')
+        reports = inputs['reports']
+        _require(isinstance(reports, list) and 0 < len(reports) <= MAX_REPORTS, 'invalid report count')
+        allowed = {v.lower() for v in chain['verifiers']}
+        quorum = chain['quorum']
+        _require(type(quorum) is int and 1 <= quorum <= len(allowed), 'invalid verifier quorum')
+        own_hash = own_final_reports.get((inputs['job_id'], failure_hash))
+        signers, references, own_matches = set(), set(), False
+        for report in reports:
+            signer = report['signer'].lower()
+            _require(signer in allowed and signer not in signers, 'unknown or duplicate verifier')
+            _require(report['job_id'] == inputs['job_id'] and report['checkpoint_hash'] == failure_hash and report['policy_hash'] == document_hash(policy) and report['is_final'] is True and report['verdict'] == 'FAIL', 'failure report context does not match')
+            _require(report['eval_set_hash'] == policy['eval_set_hash'] and report['eval_version_hash'] == policy['eval_version_hash'], 'failure evaluation context differs from policy')
+            reasons = report.get('reasons')
+            _require(isinstance(reasons, list) and bool({'BELOW_ABSOLUTE_FLOOR', 'BASE_MODEL_NOT_BEATEN'}.intersection(reasons)), 'failure report does not identify a recipe quality failure')
+            _require(verify_document(report, report['signature'], signer), 'invalid quality report signature')
+            references.add(report['reference_checkpoint_hash'])
+            if signer == own_address.lower():
+                own_matches = bool(own_hash) and document_hash(report) == own_hash
+            signers.add(signer)
+        _require(len(signers) >= quorum and own_matches and len(references) == 1, 'missing or inconsistent failure report quorum')
+    except (KeyError, TypeError, AttributeError, InvalidOperation) as exc:
+        raise PayoutEvidenceError('malformed or incomplete failure evidence') from exc
+
+
 def check_passing_evidence(inputs: dict, manifests: list[dict], delegations: dict, *, spec: dict, policy: dict, chain: dict, own_address: str, own_final_reports: dict) -> None:
     """Refuse an inconsistent passing verdict using preauthenticated chain facts.
 
