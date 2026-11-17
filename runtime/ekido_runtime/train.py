@@ -311,7 +311,9 @@ def run_training(
     micro_batch = int(exec_config["micro_batch"])
     amp = exec_config.get("amp", "none")
     if exec_config.get("grad_checkpointing") and hasattr(model, "gradient_checkpointing_enable"):
-        model.gradient_checkpointing_enable()
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
 
     optimizer_spec = spec["optimizer"]
     if optimizer_spec["name"] != "adamw":

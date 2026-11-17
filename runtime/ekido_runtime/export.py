@@ -80,9 +80,12 @@ def find_llama_cpp(explicit: str | Path | None = None) -> Path:
 
 
 def _llama_binary(llama_cpp: Path, name: str) -> Path:
-    for candidate in (llama_cpp / "build" / "bin" / name, llama_cpp / name):
-        if candidate.is_file():
-            return candidate
+    names = (name, f"{name}.exe") if os.name == "nt" else (name,)
+    for folder in (llama_cpp / "build" / "bin", llama_cpp / "build" / "bin" / "Release", llama_cpp):
+        for filename in names:
+            candidate = folder / filename
+            if candidate.is_file():
+                return candidate
     raise FileNotFoundError(f"{name} not built in {llama_cpp} (build llama.cpp first)")
 
 
@@ -136,7 +139,10 @@ def llama_cli_generate(llama_cpp: Path, gguf: Path, prompt: str, *, n_predict: i
     if prompt in text:
         text = text.split(prompt, 1)[1]
     lines = [line for line in text.splitlines() if "t/s" not in line and line.strip() not in {">", "Exiting..."}]
-    return "\n".join(lines).strip()
+    answer = "\n".join(lines).strip()
+    if not answer:
+        raise RuntimeError("llama-cli exited successfully but produced no captured answer")
+    return answer
 
 
 def main(argv: list[str] | None = None) -> int:

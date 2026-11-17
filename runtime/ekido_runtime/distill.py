@@ -117,6 +117,7 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    owns_teacher = teacher_model is None
     if teacher_tokenizer is None:
         teacher_tokenizer = load_tokenizer(teacher_id)
     if teacher_model is None:
@@ -126,6 +127,11 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
     torch.manual_seed(generation_seed)
     generated = generate_rows(teacher_model, teacher_tokenizer, recipe_id, seed_rows,
                               per_seed=per_seed, device=device)
+    teacher_revision = getattr(getattr(teacher_model, "config", None), "_commit_hash", None)
+    if owns_teacher:
+        del teacher_model
+        if device.startswith('cuda'):
+            torch.cuda.empty_cache()
     source, _target = recipe(recipe_id).columns
     normalise = lambda value: re.sub(r"\s+", " ", value.strip()).casefold()
     test_inputs = {normalise(row[source]) for row in test_rows}
@@ -156,7 +162,7 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
         "workload": "distill/v1",
         "recipe_id": recipe_id,
         "teacher": teacher_id,
-        "teacher_revision": getattr(getattr(teacher_model, "config", None), "_commit_hash", None),
+        "teacher_revision": teacher_revision,
         "generation_settings": {"seed": generation_seed, "per_seed": per_seed, "attempts_per_output": 3,
                                 "max_new_tokens": 96, "temperature": 0.8, "top_p": 0.95,
                                 "do_sample": True, "teacher_4bit": teacher_4bit},
@@ -180,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--test", type=Path, required=True, help="JSONL of the user's own test rows (never trained on)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--teacher", default=TEACHER_MODEL)
-    parser.add_argument("--student", default=LLM_BASES[0])
+    parser.add_argument("--student", choices=LLM_BASES, default=LLM_BASES[0])
     parser.add_argument("--per-seed", type=int, default=3)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--device", default=None)
@@ -205,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         teacher_model=teacher_model, teacher_tokenizer=teacher_tokenizer,
         student_model=student_model, student_tokenizer=student_tokenizer,
         teacher_id="tiny-qwen2" if args.tiny else args.teacher,
-        student_id=LLM_BASES[0], per_seed=args.per_seed, steps=args.steps, device=args.device,
+        student_id=args.student, per_seed=args.per_seed, steps=args.steps, device=args.device,
         teacher_4bit=args.teacher_4bit,
     )
     print(f"done: {result['generated_rows']} generated rows, student {result['student_eval']['pass_rate']:.1%} pass")

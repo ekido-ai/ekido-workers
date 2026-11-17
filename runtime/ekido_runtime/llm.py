@@ -33,7 +33,10 @@ def load_model(model_id: str, revision: str | None = None, *, device: str = 'cpu
     from transformers import AutoModelForCausalLM
     if load_in_4bit:
         from transformers import BitsAndBytesConfig
-        config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
+        if not device.startswith('cuda'):
+            raise ValueError('4-bit teacher loading requires a CUDA device')
+        compute_dtype = torch.bfloat16 if torch.cuda.get_device_capability(device)[0] >= 8 else torch.float16
+        config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=compute_dtype)
         return AutoModelForCausalLM.from_pretrained(model_id, revision=revision,
                                                      quantization_config=config, device_map=device)
     return AutoModelForCausalLM.from_pretrained(model_id, revision=revision, torch_dtype=dtype).to(device)

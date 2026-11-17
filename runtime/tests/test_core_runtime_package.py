@@ -11,13 +11,14 @@ import json
 import tempfile
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 from pathlib import Path
 
 import torch
 
 from ekido_core.job_spec import LLM_BASES
 from ekido_runtime import distill, export, train
-from ekido_runtime.llm import generate_answers
+from ekido_runtime.llm import generate_answers, load_model
 from ekido_runtime.model_probe import probe_step
 from ekido_runtime.tiny import build_tiny_model, build_tiny_tokenizer
 
@@ -86,13 +87,38 @@ class Runtime(unittest.TestCase):
         self.assertEqual(len(answers), 2)
         self.assertTrue(all(isinstance(a, str) for a in answers))
 
+    def test_4bit_teacher_uses_supported_compute_dtype(self):
+        with mock.patch('transformers.BitsAndBytesConfig') as config, \
+                mock.patch('transformers.AutoModelForCausalLM.from_pretrained'), \
+                mock.patch.object(torch.cuda, 'get_device_capability', return_value=(7, 5)):
+            load_model('teacher', device='cuda:0', load_in_4bit=True)
+        self.assertEqual(config.call_args.kwargs['bnb_4bit_compute_dtype'], torch.float16)
+        with self.assertRaisesRegex(ValueError, 'requires a CUDA device'):
+            load_model('teacher', device='cpu', load_in_4bit=True)
+
     def test_probe_reports_a_real_measurement(self):
         model, tokenizer = tiny_pair(self.train_rows, self.test_rows)
         model = train.apply_lora(model, self.spec)
-        result = probe_step(model, tokenizer, [row["text"] for row in self.train_rows],
-                            micro_batch=2, max_seq_length=64, device="cpu")
+        before = {name: param.detach().clone() for name, param in model.named_parameters() if param.requires_grad}
+        forwards = []
+        hook = model.register_forward_hook(lambda *_args: forwards.append(True))
+        original_step = torch.optim.AdamW.step
+        observed = []
+        def checked_step(optimizer, *args, **kwargs):
+            result = original_step(optimizer, *args, **kwargs)
+            observed.append(bool(optimizer.state))
+            return result
+        with mock.patch.object(torch.optim.AdamW, 'step', checked_step):
+            result = probe_step(model, tokenizer, [row["text"] for row in self.train_rows],
+                                micro_batch=2, accumulation=2, max_seq_length=64, device="cpu")
         self.assertTrue(result.ok, result.error)
         self.assertGreater(result.peak_mem_mib, 0)
+        self.assertEqual(observed, [True])
+        self.assertEqual(len(forwards), 2)
+        hook.remove()
+        for name, param in model.named_parameters():
+            if name in before:
+                self.assertTrue(torch.equal(param, before[name]), name)
 
     def test_compiler_approves_a_config_for_cpu(self):
         model, tokenizer = tiny_pair(self.train_rows, self.test_rows)
@@ -152,6 +178,20 @@ class Runtime(unittest.TestCase):
         loaded = AutoModelForCausalLM.from_pretrained(out)
         self.assertEqual(sum(p.numel() for p in loaded.parameters()), sum(p.numel() for p in fresh.parameters()))
 
+    def test_export_finds_release_build_tools(self):
+        build = self.tmp / 'llama' / 'build' / 'bin' / 'Release'
+        build.mkdir(parents=True)
+        name = 'llama-quantize.exe' if __import__('os').name == 'nt' else 'llama-quantize'
+        binary = build / name
+        binary.touch()
+        self.assertEqual(export._llama_binary(self.tmp / 'llama', 'llama-quantize'), binary)
+
+    def test_export_rejects_empty_cli_output(self):
+        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-cli'), \
+                mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout='')):
+            with self.assertRaisesRegex(RuntimeError, 'no captured answer'):
+                export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
+
     def test_distill_filters_generated_test_inputs(self):
         outputs = [{'text': '  SAME  test  ', 'label': 'positive'},
                    {'text': 'novel example', 'label': 'negative'}]
@@ -167,6 +207,17 @@ class Runtime(unittest.TestCase):
         self.assertEqual(result['generation_settings']['temperature'], 0.8)
         lines = (self.tmp / 'filter' / 'student_dataset.jsonl').read_text(encoding='utf-8').splitlines()
         self.assertEqual(json.loads(lines[0])['text'], 'novel example')
+
+    def test_distill_cli_passes_selected_student(self):
+        seeds, tests = self.tmp / 'seeds.jsonl', self.tmp / 'test.jsonl'
+        seeds.write_text('{"text":"seed","label":"positive"}\n', encoding='utf-8')
+        tests.write_text('{"text":"test","label":"positive"}\n', encoding='utf-8')
+        result = {'generated_rows': 1, 'student_eval': {'pass_rate': 0.5}}
+        with mock.patch.object(distill, 'run_distillation', return_value=result) as run:
+            self.assertEqual(distill.main(['--recipe', 'review-sentiment', '--seed', str(seeds),
+                                           '--test', str(tests), '--out', str(self.tmp / 'result'),
+                                           '--student', LLM_BASES[1]]), 0)
+        self.assertEqual(run.call_args.kwargs['student_id'], LLM_BASES[1])
 
     def test_long_completion_is_bounded_and_ends_with_eos(self):
         class Tokenizer:
