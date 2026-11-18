@@ -40,7 +40,17 @@ def generation_prompt(recipe_id: str, seed_row: dict) -> str:
 def _clean(text: str, seed_input: str) -> str | None:
     for line in text.splitlines():
         candidate = line.strip().strip('"').strip()
-        if len(candidate) >= 3 and candidate != seed_input:
+        # Teachers sometimes append the requested target to the new input, e.g.
+        # "... The correct category for this ticket is: refund."  That exposes
+        # the answer inside the student's input and must not become training data.
+        candidate = re.split(
+            r"\s+(?:the\s+)?correct\s+(?:category|sentiment|label|answer)"
+            r"(?:\s+for\s+[^:\n]{1,60})?\s*(?:is\s*:|is\s+|:|=)",
+            candidate, maxsplit=1, flags=re.IGNORECASE,
+        )[0].strip().strip('"').strip()
+        if re.match(r"^(?:category|sentiment|label|answer)\s*:", candidate, flags=re.IGNORECASE):
+            continue
+        if len(candidate) >= 3 and candidate.casefold() != seed_input.strip().casefold():
             return candidate
     return None
 

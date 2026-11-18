@@ -192,6 +192,14 @@ class Runtime(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'no captured answer'):
                 export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
 
+    def test_distill_cleans_answer_leakage_from_generated_inputs(self):
+        self.assertEqual(
+            distill._clean('Speaker refund chahiye. The correct category for this ticket is: refund.', 'seed'),
+            'Speaker refund chahiye.',
+        )
+        self.assertEqual(distill._clean('Category: refund\nNaya ticket', 'seed'), 'Naya ticket')
+        self.assertIsNone(distill._clean('SEED', 'seed'))
+
     def test_distill_filters_generated_test_inputs(self):
         outputs = [{'text': '  SAME  test  ', 'label': 'positive'},
                    {'text': 'novel example', 'label': 'negative'}]
