@@ -142,6 +142,8 @@ def llama_cli_generate(llama_cpp: Path, gguf: Path, prompt: str, *, n_predict: i
     if result is None or result.returncode != 0:
         raise RuntimeError(f"llama-cli failed: {(result.stdout if result else '')[-400:]}")
     text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', result.stdout or '')
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    prompt = prompt.replace('\r\n', '\n').replace('\r', '\n')
     # The prompt must be echoed so startup banners and diagnostics cannot be
     # mistaken for a successful generation.
     if prompt not in text:

@@ -1,0 +1,35 @@
+$ llama-cli -m model-Q8_0.gguf (recipe prompt)
+rc=0
+
+
+Loading model... |-\|/-\|/-\|/-\|/-\ 
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b1-10152bc
+model      : /kaggle/working/results8/export/model-Q8_0.gguf
+ftype      : Q8_0
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+[1m[32m
+> Sort this customer support ticket into exactly one category: complaint, order, question, refund or other.
+Ticket: Mera order abhi tak nahi aaya, 5 din ho gaye
+Category:
+[0morder
+
+
+Exiting...
