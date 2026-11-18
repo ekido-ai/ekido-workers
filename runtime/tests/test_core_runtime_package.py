@@ -205,6 +205,16 @@ class Runtime(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'no captured answer'):
                 export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
 
+    def test_distill_pins_the_default_teacher_and_refuses_an_unpinned_one(self):
+        self.assertRegex(distill.TEACHER_REVISION, r'^[0-9a-f]{40}$')
+        with self.assertRaisesRegex(ValueError, 'pin a revision'):
+            distill.run_distillation('review-sentiment', [], [], self.tmp / 'out', teacher_id='someone/other-teacher')
+
+    def test_export_step_that_hangs_is_stopped(self):
+        with mock.patch.object(export.subprocess, 'run', side_effect=export.subprocess.TimeoutExpired('convert', 1)):
+            with self.assertRaisesRegex(RuntimeError, 'did not finish'):
+                export._run(['convert', 'x'])
+
     def test_distill_filters_generated_test_inputs(self):
         outputs = [{'text': '  SAME  test  ', 'label': 'positive'},
                    {'text': 'novel example', 'label': 'negative'}]

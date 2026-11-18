@@ -89,8 +89,15 @@ def _llama_binary(llama_cpp: Path, name: str) -> Path:
     raise FileNotFoundError(f"{name} not built in {llama_cpp} (build llama.cpp first)")
 
 
+# Converting or quantising a small model takes minutes; a step still running after an hour has hung.
+EXPORT_TIMEOUT_S = 3600
+
+
 def _run(command: list[str]) -> None:
-    result = subprocess.run(command, capture_output=True, text=True)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=EXPORT_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"{Path(command[0]).name} did not finish within {EXPORT_TIMEOUT_S} s") from None
     if result.returncode != 0:
         tail = (result.stderr or result.stdout)[-500:]
         raise RuntimeError(f"{Path(command[0]).name} failed ({result.returncode}): {tail}")
