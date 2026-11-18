@@ -44,7 +44,7 @@ def _clean(text: str, seed_input: str) -> str | None:
         # "... The correct category for this ticket is: refund."  That exposes
         # the answer inside the student's input and must not become training data.
         candidate = re.split(
-            r"\s+(?:the\s+)?correct\s+(?:category|sentiment|label|answer)"
+            r"(?:^|\s+)(?:the\s+)?correct\s+(?:category|sentiment|label|answer)"
             r"(?:\s+for\s+[^:\n]{1,60})?\s*(?:is\s*:|is\s+|:|=)",
             candidate, maxsplit=1, flags=re.IGNORECASE,
         )[0].strip().strip('"').strip()
@@ -55,9 +55,18 @@ def _clean(text: str, seed_input: str) -> str | None:
     return None
 
 
+def _trailing_label(candidate: str, labels: tuple[str, ...]) -> bool:
+    """Reject an answer presented as a standalone final sentence, not normal text."""
+    if not labels:
+        return False
+    choices = '|'.join(re.escape(label) for label in labels)
+    return bool(re.search(r'(?:^|[.!?]\s+)(?:' + choices + r')\s*[.!?]*\s*$', candidate, re.IGNORECASE))
+
+
 @torch.no_grad()
 def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: list[dict], *,
-                  per_seed: int, device: str, max_new_tokens: int = 96, attempts: int = 3) -> list[dict]:
+                  per_seed: int, device: str, max_new_tokens: int = 96, attempts: int = 3,
+                  filter_counts: dict | None = None) -> list[dict]:
     """New rows in the recipe's format. Sampling is on: identical greedy rows are useless."""
     r = recipe(recipe_id)
     source, target = r.columns
@@ -81,6 +90,10 @@ def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: l
                 text = teacher_tokenizer.decode(output[0, encoded["input_ids"].shape[1]:], skip_special_tokens=True)
                 candidate = _clean(text, seed_row[source])
                 if candidate is None:
+                    continue
+                if _trailing_label(candidate, r.labels):
+                    if filter_counts is not None:
+                        filter_counts['trailing_label_rows_dropped'] = filter_counts.get('trailing_label_rows_dropped', 0) + 1
                     continue
                 key = re.sub(r"\s+", " ", candidate.lower())
                 if key in seen:
@@ -135,8 +148,9 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
                                    load_in_4bit=teacher_4bit)
 
     torch.manual_seed(generation_seed)
+    filter_counts = {'trailing_label_rows_dropped': 0}
     generated = generate_rows(teacher_model, teacher_tokenizer, recipe_id, seed_rows,
-                              per_seed=per_seed, device=device)
+                              per_seed=per_seed, device=device, filter_counts=filter_counts)
     teacher_revision = getattr(getattr(teacher_model, "config", None), "_commit_hash", None)
     if owns_teacher:
         del teacher_model
@@ -173,6 +187,7 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
         "recipe_id": recipe_id,
         "teacher": teacher_id,
         "teacher_revision": teacher_revision,
+        "generation_filter_counts": filter_counts,
         "generation_settings": {"seed": generation_seed, "per_seed": per_seed, "attempts_per_output": 3,
                                 "max_new_tokens": 96, "temperature": 0.8, "top_p": 0.95,
                                 "do_sample": True, "teacher_4bit": teacher_4bit},
