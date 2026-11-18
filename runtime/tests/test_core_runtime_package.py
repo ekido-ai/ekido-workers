@@ -213,10 +213,23 @@ class Runtime(unittest.TestCase):
         self.assertEqual(distill._clean('Category: refund\nNaya ticket', 'seed'), 'Naya ticket')
         self.assertIsNone(distill._clean('SEED', 'seed'))
         self.assertIsNone(distill._clean('The correct category for this ticket is: refund', 'seed'))
+        counts = {}
+        self.assertIsNone(distill._clean('The correct category for this ticket is: refund', 'seed', counts))
+        self.assertEqual(counts['answer_annotations_removed'], 1)
         real_row = ('My order 4021 was not delivered and the package was empty. Complaint. '
                     'The correct category for the given example ticket is "complaint."')
         cleaned = distill._clean(real_row, 'seed')
         self.assertTrue(distill._trailing_label(cleaned, ('complaint', 'order', 'refund')))
+        for generated, expected in (
+            ('Bluetooth speaker order 1509 ke kharab hua, refund kar dijiye please. The correct category for this ticket is: refund.',
+             'Bluetooth speaker order 1509 ke kharab hua, refund kar dijiye please.'),
+            ('Can you tell me how to check the status of my order? The correct category for this ticket is "order".',
+             'Can you tell me how to check the status of my order?'),
+            ('Order 7843 ka delivery date kya hai? The correct category for the new ticket is: order.',
+             'Order 7843 ka delivery date kya hai?'),
+        ):
+            with self.subTest(generated=generated):
+                self.assertEqual(distill._clean(generated, 'seed'), expected)
         self.assertFalse(distill._trailing_label('I need a refund.', ('complaint', 'order', 'refund')))
         self.assertTrue(distill._trailing_label('Item delivered late. Order!', ('complaint', 'order', 'refund')))
 
@@ -241,6 +254,7 @@ class Runtime(unittest.TestCase):
                                           per_seed=1, attempts=2, device='cpu', filter_counts=counts)
         self.assertEqual(generated, [{'text': 'My parcel is delayed', 'label': 'complaint'}])
         self.assertEqual(counts['trailing_label_rows_dropped'], 1)
+
     def test_distill_pins_the_default_teacher_and_refuses_an_unpinned_one(self):
         self.assertRegex(distill.TEACHER_REVISION, r'^[0-9a-f]{40}$')
         with self.assertRaisesRegex(ValueError, 'pin a revision'):

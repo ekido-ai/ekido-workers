@@ -39,17 +39,20 @@ def generation_prompt(recipe_id: str, seed_row: dict) -> str:
     )
 
 
-def _clean(text: str, seed_input: str) -> str | None:
+def _clean(text: str, seed_input: str, filter_counts: dict | None = None) -> str | None:
     for line in text.splitlines():
         candidate = line.strip().strip('"').strip()
         # Teachers sometimes append the requested target to the new input, e.g.
         # "... The correct category for this ticket is: refund."  That exposes
         # the answer inside the student's input and must not become training data.
-        candidate = re.split(
+        parts = re.split(
             r"(?:^|\s+)(?:the\s+)?correct\s+(?:category|sentiment|label|answer)"
             r"(?:\s+for\s+[^:\n]{1,60})?\s*(?:is\s*:|is\s+|:|=)",
             candidate, maxsplit=1, flags=re.IGNORECASE,
-        )[0].strip().strip('"').strip()
+        )
+        if len(parts) > 1 and filter_counts is not None:
+            filter_counts['answer_annotations_removed'] = filter_counts.get('answer_annotations_removed', 0) + 1
+        candidate = parts[0].strip().strip('"').strip()
         if re.match(r"^(?:category|sentiment|label|answer)\s*:", candidate, flags=re.IGNORECASE):
             continue
         if len(candidate) >= 3 and candidate.casefold() != seed_input.strip().casefold():
@@ -90,7 +93,7 @@ def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: l
                     temperature=0.8, top_p=0.95, pad_token_id=pad_id,
                 )
                 text = teacher_tokenizer.decode(output[0, encoded["input_ids"].shape[1]:], skip_special_tokens=True)
-                candidate = _clean(text, seed_row[source])
+                candidate = _clean(text, seed_row[source], filter_counts)
                 if candidate is None:
                     continue
                 if _trailing_label(candidate, r.labels):
@@ -154,7 +157,7 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
                                    load_in_4bit=teacher_4bit)
 
     torch.manual_seed(generation_seed)
-    filter_counts = {'trailing_label_rows_dropped': 0}
+    filter_counts = {'trailing_label_rows_dropped': 0, 'answer_annotations_removed': 0}
     generated = generate_rows(teacher_model, teacher_tokenizer, recipe_id, seed_rows,
                               per_seed=per_seed, device=device, filter_counts=filter_counts)
     teacher_revision = getattr(getattr(teacher_model, "config", None), "_commit_hash", None)
