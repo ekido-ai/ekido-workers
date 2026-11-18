@@ -24,6 +24,8 @@ from ekido_core.recipes import recipe
 from . import train as train_module
 
 TEACHER_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+# Pinned so a change on Hugging Face can never silently swap the teacher. Last modified there on 12 Jan 2025.
+TEACHER_REVISION = "a09a35458c702b33eeacc393d103063234e8bc28"
 
 
 def generation_prompt(recipe_id: str, seed_row: dict) -> str:
@@ -129,7 +131,7 @@ def build_student_spec(recipe_id: str, *, student_model: str, student_revision: 
 
 def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict], out_dir: Path, *,
                      teacher_model=None, teacher_tokenizer=None, student_model=None, student_tokenizer=None,
-                     teacher_id: str = TEACHER_MODEL, student_id: str = LLM_BASES[0],
+                     teacher_id: str = TEACHER_MODEL, teacher_pin: str | None = None, student_id: str = LLM_BASES[0],
                      student_revision: str | None = None, per_seed: int = 3, steps: int = 50,
                      device: str | None = None, exec_config: dict | None = None,
                      teacher_4bit: bool = False, generation_seed: int = 42, log=print) -> dict:
@@ -141,10 +143,14 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     owns_teacher = teacher_model is None
+    if teacher_pin is None and teacher_id == TEACHER_MODEL:
+        teacher_pin = TEACHER_REVISION
+    if (teacher_tokenizer is None or teacher_model is None) and teacher_pin is None:
+        raise ValueError(f"pin a revision for teacher {teacher_id}: an unpinned model can change between runs")
     if teacher_tokenizer is None:
-        teacher_tokenizer = load_tokenizer(teacher_id)
+        teacher_tokenizer = load_tokenizer(teacher_id, teacher_pin)
     if teacher_model is None:
-        teacher_model = load_model(teacher_id, device=device, dtype=torch.bfloat16 if device.startswith("cuda") else torch.float32,
+        teacher_model = load_model(teacher_id, teacher_pin, device=device, dtype=torch.bfloat16 if device.startswith("cuda") else torch.float32,
                                    load_in_4bit=teacher_4bit)
 
     torch.manual_seed(generation_seed)
@@ -211,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--test", type=Path, required=True, help="JSONL of the user's own test rows (never trained on)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--teacher", default=TEACHER_MODEL)
+    parser.add_argument("--teacher-revision", default=None, help="commit to pin; required for a teacher other than the default")
     parser.add_argument("--student", choices=LLM_BASES, default=LLM_BASES[0])
     parser.add_argument("--per-seed", type=int, default=3)
     parser.add_argument("--steps", type=int, default=50)
@@ -236,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
         teacher_model=teacher_model, teacher_tokenizer=teacher_tokenizer,
         student_model=student_model, student_tokenizer=student_tokenizer,
         teacher_id="tiny-qwen2" if args.tiny else args.teacher,
+        teacher_pin=None if args.tiny else args.teacher_revision,
         student_id=args.student, per_seed=args.per_seed, steps=args.steps, device=args.device,
         teacher_4bit=args.teacher_4bit,
     )

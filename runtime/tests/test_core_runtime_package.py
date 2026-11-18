@@ -120,6 +120,19 @@ class Runtime(unittest.TestCase):
             if name in before:
                 self.assertTrue(torch.equal(param, before[name]), name)
 
+    def test_probe_classifies_cuda_library_allocation_failure(self):
+        model, tokenizer = tiny_pair(self.train_rows, self.test_rows)
+        model = train.apply_lora(model, self.spec)
+        before = {name: param.detach().clone() for name, param in model.named_parameters() if param.requires_grad}
+        with mock.patch.object(model, 'forward', side_effect=RuntimeError('CUBLAS_STATUS_ALLOC_FAILED when calling cublasCreate')):
+            result = probe_step(model, tokenizer, [self.train_rows[0]['text']],
+                                micro_batch=1, max_seq_length=64, device='cpu')
+        self.assertFalse(result.ok)
+        self.assertTrue(result.oom)
+        for name, param in model.named_parameters():
+            if name in before:
+                self.assertTrue(torch.equal(param, before[name]), name)
+
     def test_compiler_approves_a_config_for_cpu(self):
         model, tokenizer = tiny_pair(self.train_rows, self.test_rows)
         model = train.apply_lora(model, self.spec)
@@ -228,6 +241,15 @@ class Runtime(unittest.TestCase):
                                           per_seed=1, attempts=2, device='cpu', filter_counts=counts)
         self.assertEqual(generated, [{'text': 'My parcel is delayed', 'label': 'complaint'}])
         self.assertEqual(counts['trailing_label_rows_dropped'], 1)
+    def test_distill_pins_the_default_teacher_and_refuses_an_unpinned_one(self):
+        self.assertRegex(distill.TEACHER_REVISION, r'^[0-9a-f]{40}$')
+        with self.assertRaisesRegex(ValueError, 'pin a revision'):
+            distill.run_distillation('review-sentiment', [], [], self.tmp / 'out', teacher_id='someone/other-teacher')
+
+    def test_export_step_that_hangs_is_stopped(self):
+        with mock.patch.object(export.subprocess, 'run', side_effect=export.subprocess.TimeoutExpired('convert', 1)):
+            with self.assertRaisesRegex(RuntimeError, 'did not finish'):
+                export._run(['convert', 'x'])
 
     def test_distill_filters_generated_test_inputs(self):
         outputs = [{'text': '  SAME  test  ', 'label': 'positive'},
