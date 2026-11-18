@@ -46,14 +46,17 @@ def _clean(text: str, seed_input: str, filter_counts: dict | None = None) -> str
         # "... The correct category for this ticket is: refund."  That exposes
         # the answer inside the student's input and must not become training data.
         parts = re.split(
-            r"(?:^|\s+)(?:the\s+)?correct\s+(?:category|sentiment|label|answer)"
-            r"(?:\s+for\s+[^:\n]{1,60})?\s*(?:is\s*:|is\s+|:|=)",
+            r"(?:^|\s+)(?:(?:the\s+)?correct\s+(?:category|sentiment|label|answer)\b"
+            r"|(?:(?:this|the)\s+)?(?:new\s+)?(?:ticket|review|text)\s+"
+            r"(?:(?:should|would)\s+be|is)\s+(?:classified|categor(?:ized|ised))\b"
+            r"|(?:(?:this|the)\s+)?(?:ticket|review|text)\s+belongs\s+to\s+the\s+category\s*:"
+            r"|to\s+categor(?:ize|ise)\s+(?:this|the)\s+(?:ticket|review|text)\s*[, :])",
             candidate, maxsplit=1, flags=re.IGNORECASE,
         )
         if len(parts) > 1 and filter_counts is not None:
             filter_counts['answer_annotations_removed'] = filter_counts.get('answer_annotations_removed', 0) + 1
         candidate = parts[0].strip().strip('"').strip()
-        if re.match(r"^(?:category|sentiment|label|answer)\s*:", candidate, flags=re.IGNORECASE):
+        if re.match(r"^(?:the\s+)?(?:category|sentiment|label|answer)\s*:", candidate, flags=re.IGNORECASE):
             continue
         if len(candidate) >= 3 and candidate.casefold() != seed_input.strip().casefold():
             return candidate

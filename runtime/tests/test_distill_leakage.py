@@ -15,6 +15,7 @@ class DistillLeakageTest(unittest.TestCase):
         self.assertEqual(distill._clean('Category: refund\nNaya ticket', 'seed'), 'Naya ticket')
         self.assertIsNone(distill._clean('SEED', 'seed'))
         self.assertIsNone(distill._clean('The correct category for this ticket is: refund', 'seed'))
+        self.assertIsNone(distill._clean('The category: complaint.', 'seed'))
         counts = {}
         self.assertIsNone(distill._clean('The correct category for this ticket is: refund', 'seed', counts))
         self.assertEqual(counts['answer_annotations_removed'], 1)
@@ -29,6 +30,18 @@ class DistillLeakageTest(unittest.TestCase):
              'Can you tell me how to check the status of my order?'),
             ('Order 7843 ka delivery date kya hai? The correct category for the new ticket is: order.',
              'Order 7843 ka delivery date kya hai?'),
+            ('Can you explain the warranty terms for your products? The new ticket should be categorized as a "question" because it asks for clarification.',
+             'Can you explain the warranty terms for your products?'),
+            ('I want a refund for the damaged item I received. The new ticket is categorized as: refund.',
+             'I want a refund for the damaged item I received.'),
+            ('My package was damaged when it arrived. This ticket should be categorized as a **complaint**.',
+             'My package was damaged when it arrived.'),
+            ('The product I received is damaged. This Ticket belongs to the category: complaint.',
+             'The product I received is damaged.'),
+            ('Can you explain the features of the latest smartphone model? The correct category for the new ticket "Can you explain the features of the latest smartphone model?',
+             'Can you explain the features of the latest smartphone model?'),
+            ('Place an order for two packs of bread, each costing Rs 50 To categorize this ticket, the correct category would be:',
+             'Place an order for two packs of bread, each costing Rs 50'),
         ):
             with self.subTest(generated=generated):
                 self.assertEqual(distill._clean(generated, 'seed'), expected)
