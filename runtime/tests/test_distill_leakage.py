@@ -47,6 +47,11 @@ class DistillLeakageTest(unittest.TestCase):
                 self.assertEqual(distill._clean(generated, 'seed'), expected)
         self.assertFalse(distill._trailing_label('I need a refund.', ('complaint', 'order', 'refund')))
         self.assertTrue(distill._trailing_label('Item delivered late. Order!', ('complaint', 'order', 'refund')))
+        self.assertTrue(distill._residual_classification_text(
+            "Bluetooth refund nahi aaya. Please find a ticket that falls under the 'refund' category.",
+            ('complaint', 'refund')))
+        self.assertFalse(distill._residual_classification_text('I need a refund.', ('complaint', 'refund')))
+        self.assertFalse(distill._residual_classification_text('Product category: shoes', ()))
 
     def test_distill_counts_dropped_trailing_labels(self):
         class Encoded(dict):
@@ -56,7 +61,9 @@ class DistillLeakageTest(unittest.TestCase):
             pad_token_id = 0
             eos_token_id = 1
             def __init__(self):
-                self.outputs = iter(['The parcel was late. Complaint.', 'My parcel is delayed'])
+                self.outputs = iter(['The parcel was late. Complaint.',
+                                     "Please provide a ticket in the 'refund' category.",
+                                     'My parcel is delayed'])
             def __call__(self, _prompt, return_tensors):
                 return Encoded(input_ids=torch.tensor([[1]]))
             def decode(self, *_args, **_kwargs):
@@ -66,7 +73,8 @@ class DistillLeakageTest(unittest.TestCase):
         counts = {'trailing_label_rows_dropped': 0}
         generated = distill.generate_rows(model, Tokenizer(), 'ticket-sorter-hinglish',
                                           [{'text': 'seed ticket', 'label': 'complaint'}],
-                                          per_seed=1, attempts=2, device='cpu', filter_counts=counts)
+                                          per_seed=1, attempts=3, device='cpu', filter_counts=counts)
         self.assertEqual(generated, [{'text': 'My parcel is delayed', 'label': 'complaint'}])
         self.assertEqual(counts['trailing_label_rows_dropped'], 1)
+        self.assertEqual(counts['classification_text_rows_dropped'], 1)
 

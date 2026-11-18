@@ -71,6 +71,14 @@ def _trailing_label(candidate: str, labels: tuple[str, ...]) -> bool:
     return bool(re.search(r'(?:^|[.!?]\s+)(?:' + choices + r')\s*[.!?]*\s*$', candidate, re.IGNORECASE))
 
 
+def _residual_classification_text(candidate: str, labels: tuple[str, ...]) -> bool:
+    """Conservatively reject remaining classifier instructions in classification inputs."""
+    return bool(labels and re.search(
+        r'\b(?:categor(?:y|ies|iz(?:e|ed|ing)|is(?:e|ed|ing))|classif(?:y|ied|ication|ying))\b',
+        candidate, re.IGNORECASE,
+    ))
+
+
 @torch.no_grad()
 def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: list[dict], *,
                   per_seed: int, device: str, max_new_tokens: int = 96, attempts: int = 3,
@@ -102,6 +110,10 @@ def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: l
                 if _trailing_label(candidate, r.labels):
                     if filter_counts is not None:
                         filter_counts['trailing_label_rows_dropped'] = filter_counts.get('trailing_label_rows_dropped', 0) + 1
+                    continue
+                if _residual_classification_text(candidate, r.labels):
+                    if filter_counts is not None:
+                        filter_counts['classification_text_rows_dropped'] = filter_counts.get('classification_text_rows_dropped', 0) + 1
                     continue
                 key = re.sub(r"\s+", " ", candidate.lower())
                 if key in seen:
@@ -160,7 +172,8 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
                                    load_in_4bit=teacher_4bit)
 
     torch.manual_seed(generation_seed)
-    filter_counts = {'trailing_label_rows_dropped': 0, 'answer_annotations_removed': 0}
+    filter_counts = {'trailing_label_rows_dropped': 0, 'answer_annotations_removed': 0,
+                     'classification_text_rows_dropped': 0}
     generated = generate_rows(teacher_model, teacher_tokenizer, recipe_id, seed_rows,
                               per_seed=per_seed, device=device, filter_counts=filter_counts)
     teacher_revision = getattr(getattr(teacher_model, "config", None), "_commit_hash", None)
