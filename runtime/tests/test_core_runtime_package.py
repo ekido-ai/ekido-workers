@@ -120,6 +120,19 @@ class Runtime(unittest.TestCase):
             if name in before:
                 self.assertTrue(torch.equal(param, before[name]), name)
 
+    def test_probe_classifies_cuda_library_allocation_failure(self):
+        model, tokenizer = tiny_pair(self.train_rows, self.test_rows)
+        model = train.apply_lora(model, self.spec)
+        before = {name: param.detach().clone() for name, param in model.named_parameters() if param.requires_grad}
+        with mock.patch.object(model, 'forward', side_effect=RuntimeError('CUBLAS_STATUS_ALLOC_FAILED when calling cublasCreate')):
+            result = probe_step(model, tokenizer, [self.train_rows[0]['text']],
+                                micro_batch=1, max_seq_length=64, device='cpu')
+        self.assertFalse(result.ok)
+        self.assertTrue(result.oom)
+        for name, param in model.named_parameters():
+            if name in before:
+                self.assertTrue(torch.equal(param, before[name]), name)
+
     def test_compiler_approves_a_config_for_cpu(self):
         model, tokenizer = tiny_pair(self.train_rows, self.test_rows)
         model = train.apply_lora(model, self.spec)

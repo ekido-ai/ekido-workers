@@ -16,6 +16,7 @@ from pathlib import Path
 import torch
 
 from .run import apply_memory_cap
+from .oom import is_memory_exhaustion
 from .trainer import create_optimizer, make_scaler, run_logical_step, trainable_named_params
 from .workloads import build_workload
 
@@ -64,7 +65,8 @@ def probe(config: dict) -> dict:
     except torch.OutOfMemoryError as exc:
         return {"ok": False, "oom": True, "error": str(exc)[:300], "duration_s": round(time.perf_counter() - t0, 3), "exec": exec_config}
     except Exception as exc:
-        return {"ok": False, "oom": False, "error": f"{type(exc).__name__}: {exc}"[:500], "duration_s": round(time.perf_counter() - t0, 3), "exec": exec_config}
+        oom = isinstance(exc, MemoryError) or (isinstance(exc, RuntimeError) and is_memory_exhaustion(str(exc)))
+        return {"ok": False, "oom": oom, "error": f"{type(exc).__name__}: {exc}"[:500], "duration_s": round(time.perf_counter() - t0, 3), "exec": exec_config}
 
 
 def main() -> int:

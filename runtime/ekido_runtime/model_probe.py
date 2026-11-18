@@ -13,6 +13,8 @@ import torch
 
 from ekido_core.compiler import ProbeResult, Target
 
+from .oom import is_memory_exhaustion
+
 
 def _rss_mib() -> float:
     # Windows does not provide resource; use its process peak working set.
@@ -96,7 +98,7 @@ def probe_step(model, tokenizer, texts: list[str], *, micro_batch: int, max_seq_
         return ProbeResult(ok=True, peak_mem_mib=float(peak), steps_per_s=float(1.0 / seconds) if seconds > 0 else None, duration_s=float(seconds))
     except (torch.cuda.OutOfMemoryError, RuntimeError, MemoryError) as exc:
         message = str(exc)
-        oom = isinstance(exc, (torch.cuda.OutOfMemoryError, MemoryError)) or "out of memory" in message.lower()
+        oom = isinstance(exc, (torch.cuda.OutOfMemoryError, MemoryError)) or is_memory_exhaustion(message)
         if device.startswith("cuda"):
             torch.cuda.empty_cache()
         return ProbeResult(ok=False, oom=oom, error=message[:300])
