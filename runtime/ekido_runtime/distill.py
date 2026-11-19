@@ -64,11 +64,16 @@ def _clean(text: str, seed_input: str, filter_counts: dict | None = None) -> str
 
 
 def _trailing_label(candidate: str, labels: tuple[str, ...]) -> bool:
-    """Reject an answer presented as a standalone final sentence, not normal text."""
+    """Reject standalone labels, including Devanagari punctuation and title-case suffixes."""
     if not labels:
         return False
     choices = '|'.join(re.escape(label) for label in labels)
-    return bool(re.search(r'(?:^|[.!?]\s+)(?:' + choices + r')\s*[.!?]*\s*$', candidate, re.IGNORECASE))
+    if re.search(r'(?:^|[.!?।॥]\s+)(?:' + choices + r')\s*[.!?।॥]*\s*$', candidate, re.IGNORECASE):
+        return True
+    # Some generations append "Complaint" without punctuation. Restrict this
+    # extra guard to title case to avoid dropping ordinary lowercase mentions.
+    title_choices = '|'.join(re.escape(label.title()) for label in labels)
+    return bool(re.search(r'\s+(?:' + title_choices + r')\s*[.!?।॥]*\s*$', candidate))
 
 
 def _residual_classification_text(candidate: str, labels: tuple[str, ...]) -> bool:
