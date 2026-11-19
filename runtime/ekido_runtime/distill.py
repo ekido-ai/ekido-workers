@@ -217,6 +217,9 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
         "recipe_id": recipe_id,
         "teacher": teacher_id,
         "teacher_revision": teacher_revision,
+        # Keep the requested pin separate from what the model config reports.
+        # Injected models are not loaded here, so no pin can be asserted for them.
+        "teacher_requested_revision": teacher_pin if owns_teacher else None,
         "generation_filter_counts": filter_counts,
         "generation_settings": {"seed": generation_seed, "per_seed": per_seed, "attempts_per_output": 3,
                                 "max_new_tokens": 96, "temperature": 0.8, "top_p": 0.95,
