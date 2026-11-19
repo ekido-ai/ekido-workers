@@ -31,6 +31,14 @@ TEACHER_REVISION = "a09a35458c702b33eeacc393d103063234e8bc28"
 def generation_prompt(recipe_id: str, seed_row: dict) -> str:
     r = recipe(recipe_id)
     source, target = r.columns
+    if recipe_id == 'invoice-fields':
+        return (
+            "Write one new fictional invoice in a single line of plain text. "
+            "Every field value in the required JSON must appear verbatim in the invoice. "
+            "Do not output JSON or explanations.\n"
+            f"Required JSON: {seed_row[target]}\n"
+            f"Example invoice: {seed_row[source]}\nNew invoice:"
+        )
     return (
         f"{r.instruction}\n"
         f"Write one new {r.input_name} for which the correct {r.answer_name} is: {seed_row[target]}\n"
@@ -84,6 +92,30 @@ def _residual_classification_text(candidate: str, labels: tuple[str, ...]) -> bo
     ))
 
 
+def _invoice_values_present(candidate: str, target: str) -> bool:
+    """Necessary literal check; it does not prove that an invoice is semantically correct."""
+    # A copied target object is answer leakage, not an invoice.
+    if re.search(r'["\'](?:vendor|invoice_no|date|total|gstin)["\']\s*:', candidate, re.IGNORECASE):
+        return False
+    try:
+        values = json.loads(target)
+    except (TypeError, ValueError):
+        return False
+    required = ('vendor', 'invoice_no', 'date', 'total', 'gstin')
+    if not isinstance(values, dict) or any(key not in values or values[key] is None for key in required):
+        return False
+    normalise = lambda value: ' '.join(str(value).casefold().split())
+    text = normalise(candidate)
+    return all(normalise(values[key]) and re.search(r'(?<!\w)' + re.escape(normalise(values[key])) + r'(?!\w)', text)
+               for key in required)
+
+
+def _faq_answer_echo(candidate: str, target: str) -> bool:
+    normalise = lambda value: ' '.join(value.casefold().split())
+    answer = normalise(target)
+    return bool(answer and answer in normalise(candidate))
+
+
 @torch.no_grad()
 def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: list[dict], *,
                   per_seed: int, device: str, max_new_tokens: int = 96, attempts: int = 3,
@@ -119,6 +151,18 @@ def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: l
                 if _residual_classification_text(candidate, r.labels):
                     if filter_counts is not None:
                         filter_counts['classification_text_rows_dropped'] = filter_counts.get('classification_text_rows_dropped', 0) + 1
+                    continue
+                if recipe_id == 'invoice-fields' and not _invoice_values_present(candidate, seed_row[target]):
+                    if filter_counts is not None:
+                        filter_counts['invoice_target_mismatch_rows_dropped'] = filter_counts.get('invoice_target_mismatch_rows_dropped', 0) + 1
+                    continue
+                if recipe_id == 'faq-bot-hinglish' and _faq_answer_echo(candidate, seed_row[target]):
+                    if filter_counts is not None:
+                        filter_counts['faq_answer_echo_rows_dropped'] = filter_counts.get('faq_answer_echo_rows_dropped', 0) + 1
+                    continue
+                if recipe_id == 'faq-bot-hinglish' and re.search(r'\bnew\s+question\s*:', candidate, re.IGNORECASE):
+                    if filter_counts is not None:
+                        filter_counts['faq_prompt_marker_rows_dropped'] = filter_counts.get('faq_prompt_marker_rows_dropped', 0) + 1
                     continue
                 key = re.sub(r"\s+", " ", candidate.lower())
                 if key in seen:
@@ -178,7 +222,8 @@ def run_distillation(recipe_id: str, seed_rows: list[dict], test_rows: list[dict
 
     torch.manual_seed(generation_seed)
     filter_counts = {'trailing_label_rows_dropped': 0, 'answer_annotations_removed': 0,
-                     'classification_text_rows_dropped': 0}
+                     'classification_text_rows_dropped': 0, 'invoice_target_mismatch_rows_dropped': 0,
+                     'faq_answer_echo_rows_dropped': 0, 'faq_prompt_marker_rows_dropped': 0}
     generated = generate_rows(teacher_model, teacher_tokenizer, recipe_id, seed_rows,
                               per_seed=per_seed, device=device, filter_counts=filter_counts)
     teacher_revision = getattr(getattr(teacher_model, "config", None), "_commit_hash", None)
