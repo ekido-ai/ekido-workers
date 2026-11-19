@@ -205,6 +205,26 @@ class Runtime(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'no captured answer'):
                 export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
 
+    def test_export_reads_answer_after_echoed_prompt(self):
+        output = '\x1b[32mLoading model\x1b[0m\n> prompt\norder\nExiting...\n'
+        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-cli'), \
+                mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=output)):
+            self.assertEqual(export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt'), 'order')
+
+    def test_export_rejects_startup_banner_without_answer(self):
+        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-cli'), \
+                mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout='Loading model\nExiting...')):
+            with self.assertRaisesRegex(RuntimeError, 'no captured answer'):
+                export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
+
+    def test_export_reads_multiline_prompt_from_t4_terminal_capture(self):
+        prompt = ('Sort this customer support ticket into exactly one category: complaint, order, question, refund or other.\n'
+                  'Ticket: Mera order abhi tak nahi aaya, 5 din ho gaye\nCategory:')
+        fixture = Path(__file__).parent / 'fixtures' / 'llama-cli-t4.txt'
+        output = fixture.read_bytes().decode('utf-8').replace('\r\n', '\n').replace('\n', '\r\n')
+        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-cli'), \
+                mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=output)):
+            self.assertEqual(export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', prompt), 'order')
     def test_distill_pins_the_default_teacher_and_refuses_an_unpinned_one(self):
         self.assertRegex(distill.TEACHER_REVISION, r'^[0-9a-f]{40}$')
         with self.assertRaisesRegex(ValueError, 'pin a revision'):

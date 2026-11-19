@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -127,24 +130,32 @@ def llama_cli_generate(llama_cpp: Path, gguf: Path, prompt: str, *, n_predict: i
     binary = _llama_binary(Path(llama_cpp), "llama-cli")
     base = [str(binary), "-m", str(gguf), "-p", prompt, "-n", str(n_predict), "--temp", "0"]
     attempts = [
-        base + ["--no-display-prompt", "--single-turn", "--no-show-timings"],
-        base + ["--no-display-prompt", "-no-cnv"],
+        base + ["--single-turn", "--no-show-timings"],
+        base + ["-no-cnv"],
         base,
     ]
     result = None
     for command in attempts:
-        # stderr is merged into stdout: some llama.cpp builds write the generation
-        # itself to stderr, and an empty capture would look like an empty answer.
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600, stdin=subprocess.DEVNULL)
+        # Recent llama-cli releases can write generated text directly to a TTY.
+        # util-linux script creates one on Linux; shlex.join quotes every argument
+        # because script executes its command string through a shell.
+        script = shutil.which('script') if sys.platform.startswith('linux') else None
+        capture_command = [script, '-qec', shlex.join(command), '/dev/null'] if script else command
+        result = subprocess.run(capture_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600, stdin=subprocess.DEVNULL)
         if result.returncode == 0:
             break
         if "invalid argument" not in (result.stdout or ""):
             break
     if result is None or result.returncode != 0:
         raise RuntimeError(f"llama-cli failed: {(result.stdout if result else '')[-400:]}")
-    text = result.stdout
-    if prompt in text:
-        text = text.split(prompt, 1)[1]
+    text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', result.stdout or '')
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    prompt = prompt.replace('\r\n', '\n').replace('\r', '\n')
+    # The prompt must be echoed so startup banners and diagnostics cannot be
+    # mistaken for a successful generation.
+    if prompt not in text:
+        raise RuntimeError("llama-cli produced no captured answer after the prompt")
+    text = text.split(prompt, 1)[1]
     lines = [line for line in text.splitlines() if "t/s" not in line and line.strip() not in {">", "Exiting..."}]
     answer = "\n".join(lines).strip()
     if not answer:
