@@ -40,7 +40,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install safetensors numpy eth-account httpx websockets "transformers==5.22.1" "peft==0.21.2" "ekido-core @ git+https://github.com/ekido-ai/ekido-core@v0.4.1#subdirectory=packages/ekido_core"
+          pip install safetensors numpy eth-account httpx websockets "transformers==5.22.1" "peft==0.21.2" "ekido-core @ git+https://github.com/ekido-ai/ekido-core@v0.4.2#subdirectory=packages/ekido_core"
       - name: Run tests
         working-directory: ${{ matrix.dir }}
         env:
