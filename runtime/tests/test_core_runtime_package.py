@@ -248,6 +248,7 @@ class Runtime(unittest.TestCase):
         self.assertEqual(result['generated_rows'], 1)
         self.assertEqual(result['generation_settings']['seed'], 42)
         self.assertEqual(result['generation_settings']['temperature'], 0.8)
+        self.assertEqual(result['generation_filter_counts']['trailing_label_rows_dropped'], 0)
         lines = (self.tmp / 'filter' / 'student_dataset.jsonl').read_text(encoding='utf-8').splitlines()
         self.assertEqual(json.loads(lines[0])['text'], 'novel example')
 
