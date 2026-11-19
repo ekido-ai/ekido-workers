@@ -47,6 +47,9 @@ class DistillLeakageTest(unittest.TestCase):
                 self.assertEqual(distill._clean(generated, 'seed'), expected)
         self.assertFalse(distill._trailing_label('I need a refund.', ('complaint', 'order', 'refund')))
         self.assertTrue(distill._trailing_label('Item delivered late. Order!', ('complaint', 'order', 'refund')))
+        self.assertTrue(distill._trailing_label('Kal se air fryer me ajeeb si awaaz aa rahi hai, dar lag raha hai use karne me Complaint', ('complaint', 'order', 'refund')))
+        self.assertTrue(distill._trailing_label('डिलीवरी वालों ने मेरा लैपटॉप खो दिया। complaint', ('complaint', 'order', 'refund')))
+        self.assertFalse(distill._trailing_label('The delivery of my order was late', ('complaint', 'order', 'refund')))
         self.assertTrue(distill._residual_classification_text(
             "Bluetooth refund nahi aaya. Please find a ticket that falls under the 'refund' category.",
             ('complaint', 'refund')))
