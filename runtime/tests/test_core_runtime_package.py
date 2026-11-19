@@ -221,6 +221,7 @@ class Runtime(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'llama-cli failed'):
                 export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
         self.assertEqual(run.call_count, 1)
+        self.assertIn('-no-cnv', ' '.join(map(str, run.call_args.args[0])))
 
     def test_export_rejects_empty_cli_output(self):
         with mock.patch.object(export, '_llama_binary', side_effect=self._legacy_llama_binary), \
