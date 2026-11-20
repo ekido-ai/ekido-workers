@@ -269,6 +269,7 @@ def run_training(
     exec_config: dict | None = None,
     eval_before: bool = False,
     stop_after: int | None = None,
+    measure_training: bool = False,
     log=print,
 ) -> dict:
     """Trains (or resumes) one llm-lora/v1 job. Returns the evidence dict, also written
@@ -345,6 +346,14 @@ def run_training(
     last_step = total_steps if stop_after is None else min(total_steps, start_step + stop_after)
     checkpoints: list[str] = []
     losses: list[float] = []
+    # Count work actually executed in this segment, including repeated examples,
+    # rather than dataset size. Padding is reported separately.
+    input_tokens = 0
+    padded_tokens = 0
+    is_cuda = device.startswith("cuda")
+    if measure_training and is_cuda:
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
     started = time.perf_counter()
     model.train()
     for step in range(start_step, last_step):
@@ -356,6 +365,10 @@ def run_training(
         step_loss = 0.0
         for micro_index, micro in enumerate(split_micro_batches(indices, micro_batch)):
             torch.manual_seed(micro_batch_seed(seed, step, micro_index))
+            if measure_training:
+                lengths = [len(encoded[i][0]) for i in micro]
+                input_tokens += sum(lengths)
+                padded_tokens += max(lengths) * len(lengths)
             batch = _collate([encoded[i] for i in micro], pad_id, device)
             with torch.autocast(device_type="cuda" if device.startswith("cuda") else "cpu", dtype=torch.float16 if amp == "fp16" else torch.bfloat16, enabled=amp in ("fp16", "bf16")):
                 loss = model(**batch).loss * micro_loss_weight(len(micro), logical_batch)
@@ -375,6 +388,20 @@ def run_training(
             checkpoints.append(str(path))
         log(f"step {done}/{total_steps} loss {step_loss:.4f} lr {lr:.2e}")
 
+    if measure_training and is_cuda:
+        torch.cuda.synchronize(device)
+    training_seconds = time.perf_counter() - started
+    training_metrics = {
+        "scope": "training loop including checkpoint writes; excludes model loading and evaluation",
+        "steps": max(0, last_step - start_step),
+        "non_padding_tokens": input_tokens,
+        "input_tokens_including_padding": padded_tokens,
+        "seconds": training_seconds,
+        "non_padding_tokens_per_second": input_tokens / training_seconds if training_seconds > 0 and input_tokens else None,
+        "gpu_name": torch.cuda.get_device_name(device) if is_cuda else None,
+        "peak_allocated_bytes": torch.cuda.max_memory_allocated(device) if is_cuda else None,
+        "peak_reserved_bytes": torch.cuda.max_memory_reserved(device) if is_cuda else None,
+    } if measure_training else None
     trained_eval = evaluate(model, tokenizer, spec["recipe_id"], test_rows, device=device, max_seq_length=max_seq_length)
     log(f"trained model: {trained_eval['pass_rate']:.1%} pass on {trained_eval['examples']} test rows")
     evidence = {
@@ -394,6 +421,8 @@ def run_training(
         "checkpoints": checkpoints,
         "seconds": round(time.perf_counter() - started, 1),
     }
+    if training_metrics is not None:
+        evidence["training_metrics"] = training_metrics
     (out_dir / "evidence.json").write_text(json.dumps(evidence, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return evidence
 
@@ -410,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exec-config", type=Path, default=None, help="exec config JSON; the compiler probes if omitted")
     parser.add_argument("--tiny", action="store_true", help="CI smoke run: a tiny random Qwen2 instead of the spec's base")
     parser.add_argument("--eval-before", action="store_true", help="score the base model (adapter disabled) first")
+    parser.add_argument("--measure-training", action="store_true", help="record training-loop token throughput and peak CUDA memory")
     args = parser.parse_args(argv)
 
     spec = json.loads(args.spec.read_text(encoding="utf-8"))
@@ -426,7 +456,7 @@ def main(argv: list[str] | None = None) -> int:
     evidence = run_training(
         spec, args.dataset, args.out,
         device=args.device, model=model, tokenizer=tokenizer,
-        resume=args.resume, exec_config=exec_config, eval_before=args.eval_before,
+        resume=args.resume, exec_config=exec_config, eval_before=args.eval_before, measure_training=args.measure_training,
     )
     print(f"done: {evidence['eval']['pass_rate']:.1%} pass, checkpoints in {args.out / 'checkpoints'}")
     return 0
