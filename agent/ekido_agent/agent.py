@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import logging
 import math
@@ -27,7 +28,9 @@ from pathlib import Path
 import websockets
 from eth_account import Account
 
+from ekido_core import jobkeys
 from ekido_core.signing import sign_document
+from ekido_core.checkpoint_crypto import CheckpointError, ciphertext_name, decrypt_checkpoint_files
 from ekido_core.checkpoint_files import checkpoint_files
 from ekido_core.transfer import download_blob, upload_blob
 
@@ -44,6 +47,7 @@ TELEMETRY_SECONDS = 2.0
 PROBE_TIMEOUT_SECONDS = 170.0
 PARTITION_SECONDS = 25.0
 UPLOAD_ATTEMPTS = 3
+KEY_WAIT_SECONDS = 30.0  # how long a resume from an encrypted checkpoint waits for the job key
 
 
 def enrollment_document(provider_id: str, worker_key: str) -> dict:
@@ -92,6 +96,11 @@ class Agent:
         self.injected_exit = False
         self.corrupt_next_upload = False
         self.send_lock = asyncio.Lock()
+        # The job key (A12). Held in memory only, for one assignment, and forgotten when the run ends. A fresh keypair is
+        # made for every assignment; the coordinator encrypts the job's key to its public half, so only this process can read it.
+        self._pending_key: tuple[str, int, jobkeys.JobKey] | None = None  # (job_id, fencing_token, our one-off keypair)
+        self._job_key: tuple[str, int, jobkeys.JobKey] | None = None  # (job_id, fencing_token, the job's key)
+        self._start_task: asyncio.Task | None = None  # a start that is waiting for the job key
 
     @property
     def http_base(self) -> str:
@@ -183,13 +192,74 @@ class Agent:
         elif kind == "cmd.probe":
             asyncio.create_task(self.do_probe(payload))
         elif kind == "cmd.start_run":
-            await self.start_run(payload["config"])
+            config = payload["config"]
+            if (config.get("resume_manifest") or {}).get("format") == "GPCK/2":
+                # Resuming from an encrypted checkpoint waits for the job key, which arrives as a message: don't block the message loop.
+                self._cancel_pending_start()
+                self._start_task = asyncio.create_task(self.start_run(config))
+            else:
+                await self.start_run(config)
         elif kind == "cmd.stop_run":
             await self.stop_run(message.get("fencing_token"), payload.get("reason"))
         elif kind == "cmd.inject_fault":
             await self.inject_fault(payload.get("kind"))
+        elif kind == "job_key.release":
+            self.receive_job_key(message.get("job_id"), message.get("fencing_token"), payload.get("ciphertext_b64"))
+        elif kind == "error" and payload.get("error") == "KEY_REFUSED":
+            log.warning("the coordinator refused the job key: %s", payload.get("reason"))  # a fixed code, never key material
         elif kind == "error":
             log.warning("coordinator reported: %s", payload)
+
+    # ------------------------------------------------------------ job key (A12)
+
+    async def request_job_key(self, job_id: str, token: int) -> None:
+        """Make a fresh keypair for this assignment and ask the coordinator for the job's key, naming our public half."""
+        ours = jobkeys.create_job_key()
+        self._pending_key = (job_id, token, ours)
+        await self.send("job_key.request", {"recipient": ours.recipient}, job_id=job_id, fencing_token=token)
+
+    def receive_job_key(self, job_id, token, ciphertext_b64) -> None:
+        """The job's key, encrypted to the keypair we made. A reply for another job or attempt is ignored."""
+        pending = self._pending_key
+        if pending is None or (pending[0], pending[1]) != (job_id, token) or not isinstance(ciphertext_b64, str):
+            return
+        try:
+            identity = jobkeys.decrypt_bytes(base64.b64decode(ciphertext_b64, validate=True), pending[2].identity).decode("ascii")
+            key = jobkeys.JobKey(recipient=str(jobkeys.x25519.Identity.from_str(identity).to_public()), identity=identity)
+        except Exception:  # any failure (bad base64, wrong key, damaged data) means no key; the message says nothing more
+            log.warning("could not read the job key sent for job %s", job_id)
+            return
+        self._job_key = (job_id, token, key)
+        self._pending_key = None
+
+    def job_key(self) -> "jobkeys.JobKey | None":
+        """The key for the run in progress, or None. Never stored on disk, never logged."""
+        held = self._job_key
+        if held is not None and (held[0], held[1]) == (self.job_id, self.fencing_token):
+            return held[2]
+        return None
+
+    async def wait_for_job_key(self, job_id: str, token: int, timeout: float = KEY_WAIT_SECONDS) -> "jobkeys.JobKey | None":
+        """The job key for this assignment, once the coordinator has sent it; None if it does not arrive in time."""
+        deadline = time.monotonic() + timeout
+        while True:
+            held = self._job_key
+            if held is not None and (held[0], held[1]) == (job_id, token):
+                return held[2]
+            if time.monotonic() >= deadline:
+                return None
+            await asyncio.sleep(0.05)
+
+    def _cancel_pending_start(self) -> None:
+        task = self._start_task
+        if task is None or task is asyncio.current_task():  # start_run itself calls stop_run: it must not cancel or forget itself
+            return
+        self._start_task = None
+        if not task.done():
+            task.cancel()
+
+    def forget_job_key(self) -> None:
+        self._pending_key = self._job_key = None
 
     # ------------------------------------------------------------- probing
 
@@ -221,13 +291,26 @@ class Agent:
     def _download(self, digest: str, target: Path, expected_bytes: int) -> None:
         download_blob(self.http_base, self.upload_token, digest, target, expected_bytes, timeout=120)
 
-    def _prepare_resume(self, workdir: Path, manifest: dict) -> None:
-        """The runtime validates everything again on load. This only fetches the files."""
+    def _prepare_resume(self, workdir: Path, manifest: dict, identity: str | None = None) -> None:
+        """The runtime validates everything again on load. This only fetches the files, and for an encrypted (GPCK/2) checkpoint
+        decrypts them first with the job key, which is used here and goes no further. The real manifest is kept, so lineage hashes hold."""
         files = checkpoint_files(manifest)
         resume = workdir / "resume"
         resume.mkdir(parents=True, exist_ok=True)
-        for name, entry in files.items():
-            self._download(entry["sha256"], resume / name, entry["bytes"])
+        if manifest.get("format") == "GPCK/2":
+            if not identity:
+                raise ValueError("the job key is needed to resume from an encrypted checkpoint")
+            blobs = workdir / "resume_blobs"
+            blobs.mkdir(parents=True, exist_ok=True)
+            try:
+                for name, entry in files.items():
+                    self._download(entry["sha256"], blobs / ciphertext_name(name), entry["bytes"])  # the blob's name is its hash
+                decrypt_checkpoint_files(blobs, manifest, identity, resume)
+            finally:
+                shutil.rmtree(blobs, ignore_errors=True)
+        else:
+            for name, entry in files.items():
+                self._download(entry["sha256"], resume / name, entry["bytes"])
         (resume / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     async def start_run(self, config: dict) -> None:
@@ -251,6 +334,7 @@ class Agent:
             await self.send("run.exited", {"reason": "START_FAILED", "detail": str(exc)[:300]}, job_id=job_id, fencing_token=token)
             return
 
+        await self.request_job_key(job_id, token)
         run_config = dict(config)
         manifest = run_config.pop("resume_manifest", None)
         run_config.pop("resume_from_hash", None)
@@ -261,7 +345,14 @@ class Agent:
             run_config["fault"] = self.config.fault
         try:
             if manifest:
-                await asyncio.to_thread(self._prepare_resume, workdir, manifest)
+                identity = None
+                if manifest.get("format") == "GPCK/2":
+                    key = await self.wait_for_job_key(job_id, token)
+                    if key is None:
+                        await self.send("run.exited", {"reason": "START_FAILED", "detail": "the job key did not arrive, so the encrypted checkpoint cannot be read"}, job_id=job_id, fencing_token=token)
+                        return
+                    identity = key.identity
+                await asyncio.to_thread(self._prepare_resume, workdir, manifest, identity)
                 run_config["resume_from"] = "resume"
             spec = run_config.get("spec") or {}
             if spec.get("template") == "llm-lora/v1":
@@ -273,18 +364,23 @@ class Agent:
             self.injected_exit = False
             env = {"PYTHONPATH": os.pathsep.join(sys.path)} if self.config.mode == "process" else None
             await asyncio.to_thread(self.runner.start, run_config, extra_env=env)
-        except (OSError, urllib.error.URLError, ValueError) as exc:
+        except (OSError, urllib.error.URLError, ValueError, CheckpointError) as exc:  # CheckpointError is a ValueError; named for clarity
             await self.send("run.exited", {"reason": "START_FAILED", "detail": str(exc)[:300]}, job_id=job_id, fencing_token=token)
             return
         self.run_task = asyncio.create_task(self.follow_run(self.runner, job_id, token))
 
     async def stop_run(self, fencing_token: int | None, reason: str | None) -> None:
         """A stale order for an older attempt is ignored, so it can't kill a newer run here."""
+        self._cancel_pending_start()
+        held = {entry[1] for entry in (self._pending_key, self._job_key) if entry is not None}
+        if fencing_token is None or fencing_token in held:
+            self.forget_job_key()  # even if the runtime never started, a stopped assignment must not keep its key
         if self.runner is None or (fencing_token is not None and fencing_token != self.fencing_token):
             return
         log.info("stopping run: %s", reason)
         runner, task = self.runner, self.run_task
         self.runner, self.run_task, self.job_id, self.fencing_token = None, None, None, None
+        self.forget_job_key()
         if task is not None:
             task.cancel()
         await asyncio.to_thread(runner.kill)
@@ -317,6 +413,7 @@ class Agent:
                     await self.send("run.exited", {"reason": "PROCESS_EXIT", "code": code, "injected": self.injected_exit}, job_id=job_id, fencing_token=token)
                 if self.runner is runner:
                     self.runner, self.run_task, self.job_id, self.fencing_token = None, None, None, None
+                    self.forget_job_key()
                 return
             await asyncio.sleep(TAIL_POLL_SECONDS)
 
@@ -327,6 +424,7 @@ class Agent:
         await self.send("run.exited", {"reason": "BAD_CHECKPOINT", "injected": self.injected_exit}, job_id=job_id, fencing_token=token)
         if self.runner is runner:
             self.runner, self.run_task, self.job_id, self.fencing_token = None, None, None, None
+            self.forget_job_key()
 
     async def forward(self, runner: Runner, event: dict, job_id: str, token: int) -> bool:
         """Returns False if the run can't usefully continue."""
@@ -357,7 +455,8 @@ class Agent:
         """
         manifest, directory = event["manifest"], self._host_path(runner, event["path"])
         for name, entry in manifest["files"].items():
-            path = directory / name
+            # An encrypted (GPCK/2) checkpoint uploads the encrypted blob; the manifest's sha256 is the hash of those stored bytes.
+            path = directory / (ciphertext_name(name) if manifest.get("format") == "GPCK/2" else name)
             if self.corrupt_next_upload:
                 self.corrupt_next_upload = False
                 raw = bytearray(path.read_bytes())
