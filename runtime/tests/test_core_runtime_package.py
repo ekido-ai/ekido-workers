@@ -248,9 +248,28 @@ class Runtime(unittest.TestCase):
         self.assertEqual(result['generated_rows'], 1)
         self.assertEqual(result['generation_settings']['seed'], 42)
         self.assertEqual(result['generation_settings']['temperature'], 0.8)
+        self.assertIsNone(result['teacher_requested_revision'])  # injected, not loaded by this run
         self.assertEqual(result['generation_filter_counts']['trailing_label_rows_dropped'], 0)
         lines = (self.tmp / 'filter' / 'student_dataset.jsonl').read_text(encoding='utf-8').splitlines()
         self.assertEqual(json.loads(lines[0])['text'], 'novel example')
+
+    def test_distill_records_requested_pin_when_model_reports_no_commit(self):
+        teacher = SimpleNamespace(config=SimpleNamespace(_commit_hash=None))
+        generated = [{'text': 'novel example', 'label': 'positive'}]
+        with mock.patch('ekido_runtime.llm.load_model', return_value=teacher) as load, \
+                mock.patch('ekido_runtime.llm.load_tokenizer', return_value=object()), \
+                mock.patch.object(distill, 'generate_rows', return_value=generated), \
+                mock.patch.object(train, 'run_training', return_value={'eval': {}, 'base_eval': {}}):
+            result = distill.run_distillation(
+                'review-sentiment', [{'text': 'seed text', 'label': 'positive'}],
+                [{'text': 'test text', 'label': 'positive'}], self.tmp / 'requested-pin',
+                student_model=object(), student_tokenizer=object(), device='cpu', log=lambda *a: None)
+        self.assertEqual(load.call_args.args[1], distill.TEACHER_REVISION)
+        self.assertIsNone(result['teacher_revision'])
+        self.assertEqual(result['teacher_requested_revision'], distill.TEACHER_REVISION)
+        saved = json.loads((self.tmp / 'requested-pin' / 'distill_evidence.json').read_text(encoding='utf-8'))
+        self.assertEqual(saved['teacher_requested_revision'], distill.TEACHER_REVISION)
+        self.assertIsNone(saved['teacher_revision'])
 
     def test_distill_cli_passes_selected_student(self):
         seeds, tests = self.tmp / 'seeds.jsonl', self.tmp / 'test.jsonl'
