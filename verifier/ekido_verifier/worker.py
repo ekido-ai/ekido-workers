@@ -9,9 +9,11 @@ set, and the product says so.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
 import urllib.error
@@ -25,6 +27,8 @@ from ekido_core.settlement import build_verdict
 from ekido_core.checkpoint_files import checkpoint_files
 from ekido_core.transfer import download_blob
 from ekido_core.canonical import document_hash
+from ekido_core import jobkeys
+from ekido_core.checkpoint_crypto import CheckpointError, ciphertext_name, decrypt_checkpoint_files
 from ekido_core.signing import sign_document, sign_verdict, verify_document
 
 from .evaluate import base_cache_key, evaluate_checkpoint, load_eval_set, sign_report
@@ -143,11 +147,38 @@ class Verifier:
     def _download(self, digest: str, target: Path, expected_bytes: int) -> None:
         download_blob(self.base, self.token, digest, target, expected_bytes, timeout=300)
 
-    def _fetch_checkpoint(self, manifest: dict, directory: Path) -> Path:
+    def _job_key_identity(self, job_id: str) -> str:
+        """The job's key for the evaluation this verifier has claimed (ticket A12). It makes a one-off key pair, sends only the public half,
+        and decrypts the coordinator's answer. The result lives in memory for this task and is never written or logged. If the coordinator
+        refuses (HTTP error) nothing is reported for the task: a missing key is not a verdict."""
+        ours = jobkeys.create_job_key()
+        reply = self._call("POST", "/verifier/tasks/job-key", {"address": self.address, "job_id": job_id, "recipient": ours.recipient})
+        sealed = base64.b64decode(reply["ciphertext_b64"], validate=True)
+        return jobkeys.decrypt_bytes(sealed, ours.identity).decode("ascii")
+
+    def _fetch_checkpoint(self, manifest: dict, directory: Path, identity: str | None = None) -> Path:
         files = checkpoint_files(manifest)
         directory.mkdir(parents=True, exist_ok=True)
-        for name, entry in files.items():
-            self._download(entry["sha256"], directory / name, entry["bytes"])
+        if manifest.get("format") == "GPCK/2":
+            if not identity:
+                raise ValueError("the job key is needed to read an encrypted checkpoint")
+            blobs = directory.parent / (directory.name + "_blobs")
+            blobs.mkdir(parents=True, exist_ok=True)
+            try:
+                for name, entry in files.items():
+                    self._download(entry["sha256"], blobs / ciphertext_name(name), entry["bytes"])  # checked against the manifest's hash of the stored bytes
+                decrypt_checkpoint_files(blobs, manifest, identity, directory)
+            except CheckpointError as exc:
+                if exc.code == "DECRYPT_FAILED":
+                    raise  # a key and a blob that do not fit could be either side's fault: report nothing rather than guess
+                # The blob or the manifest does not hold together (a size or hash that differs): leave no tensor files, so the
+                # normal evaluation refuses the checkpoint and reports FAIL with its usual reason.
+                log.warning("checkpoint refused before evaluation: %s", exc.code)
+            finally:
+                shutil.rmtree(blobs, ignore_errors=True)
+        else:
+            for name, entry in files.items():
+                self._download(entry["sha256"], directory / name, entry["bytes"])
         (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         return directory
 
@@ -168,8 +199,11 @@ class Verifier:
     def handle(self, task: dict) -> dict:
         with tempfile.TemporaryDirectory(prefix="verify_") as tmp:
             root = Path(tmp)
-            checkpoint = self._fetch_checkpoint(task["manifest"], root / "candidate")
-            reference = self._fetch_checkpoint(task["reference_manifest"], root / "reference") if task.get("reference_manifest") else None
+            encrypted = any((m or {}).get("format") == "GPCK/2" for m in (task["manifest"], task.get("reference_manifest")))
+            identity = self._job_key_identity(task["job_id"]) if encrypted else None  # once per task, for the candidate and the reference
+            checkpoint = self._fetch_checkpoint(task["manifest"], root / "candidate", identity)
+            reference = self._fetch_checkpoint(task["reference_manifest"], root / "reference", identity) if task.get("reference_manifest") else None
+            identity = None
             started = time.perf_counter()
             report = evaluate_checkpoint(
                 job_id=task["job_id"],
