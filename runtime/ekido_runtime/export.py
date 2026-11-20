@@ -121,33 +121,43 @@ def quantize_gguf(gguf_in: Path, out_file: Path, quant: str, *, llama_cpp: Path)
     return out_file
 
 
-def llama_cli_generate(llama_cpp: Path, gguf: Path, prompt: str, *, n_predict: int = 16) -> str:
-    """One CPU generation through llama-cli: the exported model, serving.
+def llama_cli_generate(llama_cpp: Path, gguf: Path, prompt: str, *, n_predict: int = 16,
+                       context_size: int = 512) -> str:
+    """Generate with the raw recipe prompt, not an automatic chat template.
 
-    llama.cpp renames its display/conversation flags between releases, so this tries
-    the quiet flags first and falls back to the minimal set every build accepts.
+    Callers must keep the prompt and requested output within ``context_size``.
+    Prefer llama-completion; older builds can use llama-cli only if it accepts
+    the explicit no-conversation flag. Never fall back to implicit chat mode.
     """
-    binary = _llama_binary(Path(llama_cpp), "llama-cli")
-    base = [str(binary), "-m", str(gguf), "-p", prompt, "-n", str(n_predict), "--temp", "0"]
-    attempts = [
-        base + ["--single-turn", "--no-show-timings"],
-        base + ["-no-cnv"],
-        base,
-    ]
-    result = None
-    for command in attempts:
-        # Recent llama-cli releases can write generated text directly to a TTY.
-        # util-linux script creates one on Linux; shlex.join quotes every argument
-        # because script executes its command string through a shell.
-        script = shutil.which('script') if sys.platform.startswith('linux') else None
-        capture_command = [script, '-qec', shlex.join(command), '/dev/null'] if script else command
-        result = subprocess.run(capture_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600, stdin=subprocess.DEVNULL)
-        if result.returncode == 0:
-            break
-        if "invalid argument" not in (result.stdout or ""):
-            break
-    if result is None or result.returncode != 0:
-        raise RuntimeError(f"llama-cli failed: {(result.stdout if result else '')[-400:]}")
+    if context_size < 1 or n_predict < 1:
+        raise ValueError("context_size and n_predict must be positive")
+    try:
+        binary = _llama_binary(Path(llama_cpp), "llama-completion")
+    except FileNotFoundError:
+        binary = _llama_binary(Path(llama_cpp), "llama-cli")
+    else:
+        command = [str(binary), "-m", str(gguf), "-p", prompt, "-n", str(n_predict),
+                   "--temp", "0", "--no-conversation", "--no-display-prompt",
+                   "--no-warmup", "--simple-io", "-c", str(context_size)]
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, timeout=600, stdin=subprocess.DEVNULL)
+        if result.returncode != 0:
+            raise RuntimeError(f"llama-completion failed: {(result.stderr or '')[-400:]}")
+        answer = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', result.stdout or '').strip()
+        if not answer:
+            raise RuntimeError("llama-completion produced no captured answer")
+        return answer
+
+    command = [str(binary), "-m", str(gguf), "-p", prompt, "-n", str(n_predict),
+               "--temp", "0", "-no-cnv", "-c", str(context_size)]
+    # Older llama-cli builds can write directly to a TTY. Never retry without
+    # -no-cnv: that would silently change the model's prompt format.
+    script = shutil.which('script') if sys.platform.startswith('linux') else None
+    capture_command = [script, '-qec', shlex.join(command), '/dev/null'] if script else command
+    result = subprocess.run(capture_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, timeout=600, stdin=subprocess.DEVNULL)
+    if result.returncode != 0:
+        raise RuntimeError(f"llama-cli failed: {(result.stdout or '')[-400:]}")
     text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', result.stdout or '')
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     prompt = prompt.replace('\r\n', '\n').replace('\r', '\n')
