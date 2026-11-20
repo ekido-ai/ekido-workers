@@ -2,6 +2,22 @@
 
 The part of Ekido that runs on a provider's GPU. This folder holds the training loop, the run entry point that writes and restores checkpoints, and the workloads it can train. The memory probe tries a candidate config for real, so the elastic compiler can approve it.
 
+For an opt-in training-cost measurement, pass `--measure-training` to
+`ekido_runtime.train`. The resulting `evidence.json` includes a
+`training_metrics` object for the steps executed in that attempt: non-padding
+input tokens (prompt plus completion), input tokens including padding, elapsed training-loop
+seconds, non-padding tokens per second, GPU name, and peak allocated and
+reserved CUDA bytes. The clock includes checkpoint writes and per-step logging;
+it excludes model loading, dataset preparation and evaluations. CUDA is
+synchronised before and after the loop, and peak memory counters are reset at
+the start of a measured CUDA run; existing model allocations and cached
+reserved memory are included in the peaks. CPU runs report null GPU fields.
+Resumed attempts report only the steps and tokens processed in that attempt.
+
+These measurements are not a price. Cost per million tokens additionally needs
+a sourced, dated hourly GPU price and an explicit billing/overhead assumption;
+training results from one GPU or recipe must not be treated as another's.
+
 ## The step model
 
 A job is priced, checkpointed and verified in **logical steps**. One logical step is one optimizer update over `logical_batch_size` examples, and it means the same thing on every GPU.
