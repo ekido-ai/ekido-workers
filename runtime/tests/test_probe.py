@@ -33,3 +33,31 @@ class Probe(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProbeDataFolder(unittest.TestCase):
+    """The probe must hand the job's folder to the workload: llm-lora/v1 reads dataset.jsonl from it (found on 24 Nov,
+    when a real provider refused every LLM job with "needs the run folder that holds dataset.jsonl")."""
+
+    def test_the_data_folder_reaches_the_workload(self):
+        import json
+        import sys
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from ekido_runtime import probe as probe_module
+
+        seen = {}
+
+        def fake_build(spec, exec_config, device, *, with_data=True, data_dir=None):
+            seen["data_dir"] = data_dir
+            raise ValueError("stop here")
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(probe_module, "build_workload", fake_build):
+            config = Path(tmp) / "config.json"
+            config.write_text(json.dumps({"spec": {"template": "llm-lora/v1", "optimizer": {}}, "exec": {"amp": "fp32"}, "device": "cpu"}), encoding="utf-8")
+            with mock.patch.object(sys, "argv", ["probe", str(config), str(Path(tmp) / "result.json")]):
+                probe_module.main()
+            self.assertEqual(Path(seen["data_dir"]), Path(tmp).resolve())
+            self.assertFalse(json.loads((Path(tmp) / "result.json").read_text(encoding="utf-8"))["ok"])

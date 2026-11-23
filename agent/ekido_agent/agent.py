@@ -203,6 +203,11 @@ class Agent:
         root = Path(tempfile.mkdtemp(prefix="probe_", dir=self.config.workdir))
         try:
             (root / "config.json").write_text(json.dumps(dict(config, device=self.config.device)), encoding="utf-8")
+            spec = config.get("spec") or {}
+            dataset = spec.get("dataset") if isinstance(spec.get("dataset"), dict) else {}
+            if spec.get("template") == "llm-lora/v1" and dataset.get("sha256"):
+                # The probe trains a few steps on the customer's own rows, so it needs them like a run does (verified by hash).
+                self._download(dataset["sha256"], root / "dataset.jsonl", dataset["bytes"])
             command, env = probe_command(root, self.config.mode, self.config.docker or DockerOptions(), secrets.token_hex(4))
             import subprocess
 
