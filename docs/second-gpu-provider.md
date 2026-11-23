@@ -20,7 +20,7 @@ Use Python 3.12 and a torch build that sees the GPU. From the repo root:
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install torch --index-url https://download.pytorch.org/whl/cu130   # Check this matches the GPU's driver.
-pip install "transformers==5.22.1" "peft==0.21.2" safetensors datasets numpy eth-account websockets
+pip install "transformers==5.23.0" "peft==0.22.0" safetensors datasets numpy eth-account websockets
 python -c "import torch; print(torch.cuda.get_device_name(0))"
 ```
 
