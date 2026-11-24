@@ -119,6 +119,50 @@ class Upload(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sent["type"], "checkpoint.uploaded")
             self.assertEqual(sent["payload"]["manifest"], world.manifest)
 
+    async def test_nothing_is_uploaded_unless_every_file_is_an_age_blob(self):
+        world = World()
+        cases = {
+            "a renamed plaintext file": lambda folder, name: (folder / ciphertext_name(name)).write_bytes(world.plain[name]),
+            "an empty file": lambda folder, name: (folder / ciphertext_name(name)).write_bytes(b""),
+            "a missing blob": lambda folder, name: (folder / ciphertext_name(name)).unlink(),
+        }
+        for label, damage in cases.items():
+            with self.subTest(label), tempfile.TemporaryDirectory() as tmp:
+                agent = make_agent(tmp)
+                agent.upload_token = "t"
+                folder = Path(tmp) / "step"
+                folder.mkdir()
+                for name in NAMES:
+                    (folder / name).write_bytes(world.plain[name])
+                    (folder / ciphertext_name(name)).write_bytes(world.store[world.manifest["files"][name]["sha256"]])
+                damage(folder, NAMES[1])  # the second file is bad: not even the good first one may be sent
+                uploaded = []
+                agent._upload = lambda path, digest: uploaded.append(Path(path).name)
+                ok = await agent.upload_checkpoint(Mock(workdir=Path(tmp)), {"manifest": world.manifest, "path": str(folder), "step": 10}, JOB, 3)
+                self.assertFalse(ok)
+                self.assertEqual(uploaded, [])
+                self.assertEqual([m["type"] for m in agent.sent], ["run.warning"])
+                self.assertEqual(agent.sent[0]["payload"]["rule"], "CHECKPOINT_NOT_ENCRYPTED")
+
+    async def test_a_manifest_that_names_a_path_or_a_hidden_file_is_refused_for_an_encrypted_checkpoint(self):
+        world = World()
+        for bad in ("../outside.safetensors", "sub/dir.safetensors", ".hidden", ""):
+            with self.subTest(bad), tempfile.TemporaryDirectory() as tmp:
+                agent = make_agent(tmp)
+                folder = Path(tmp) / "step"
+                folder.mkdir()
+                # A real age blob sits at the place the bad name points to, so only the name check can refuse it (not "file missing").
+                blob = next(iter(world.store.values()))
+                target = folder / ciphertext_name(bad)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.resolve().write_bytes(blob)
+                self.assertTrue(target.resolve().is_file())
+                manifest = {"format": "GPCK/2", "files": {bad: next(iter(world.manifest["files"].values()))}}
+                uploaded = []
+                agent._upload = lambda path, digest: uploaded.append(path)
+                self.assertFalse(await agent.upload_checkpoint(Mock(workdir=Path(tmp)), {"manifest": manifest, "path": str(folder), "step": 1}, JOB, 3))
+                self.assertEqual(uploaded, [])
+
     async def test_a_gpck_1_checkpoint_still_uploads_its_plain_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = make_agent(tmp)

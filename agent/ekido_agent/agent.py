@@ -452,6 +452,23 @@ class Agent:
     def _upload(self, path: Path, digest: str) -> None:
         upload_blob(self.http_base, self.upload_token, path, digest, timeout=120)
 
+    @staticmethod
+    def _encrypted_upload_problem(directory: Path, name: str) -> str | None:
+        """Why this file of a GPCK/2 checkpoint must not be uploaded, or None. Never reads more than the age header."""
+        if not name or Path(name).name != name or name.startswith("."):
+            return "a checkpoint file name is not a plain file name"
+        blob = directory / ciphertext_name(name)
+        if not blob.name.endswith(".age"):
+            return "only .age blobs may be uploaded"
+        try:
+            with blob.open("rb") as handle:
+                head = handle.read(len(jobkeys.AGE_HEADER))
+        except OSError:
+            return "an encrypted blob is missing, so nothing was uploaded"
+        if head != jobkeys.AGE_HEADER:
+            return "a file that should be an encrypted blob is not age ciphertext, so nothing was uploaded"
+        return None
+
     async def upload_checkpoint(self, runner: Runner, event: dict, job_id: str, token: int) -> bool:
         """Blobs first, then the signed manifest, which is the commit. A crash in between leaves nothing committed.
 
@@ -459,6 +476,15 @@ class Agent:
         because the store rejects content that doesn't match its hash, and sending it again can't help.
         """
         manifest, directory = event["manifest"], self._host_path(runner, event["path"])
+        if manifest.get("format") == "GPCK/2":
+            # Only `<name>.age` blobs may leave this device. The plaintext tensors stay here, so before anything is sent every file is checked:
+            # a safe name, a `.age` file, and bytes that really are age ciphertext (a renamed plaintext file is refused).
+            for name in manifest["files"]:
+                problem = self._encrypted_upload_problem(directory, name)
+                if problem:
+                    log.warning("checkpoint at step %s not uploaded: %s", event.get("step"), problem)
+                    await self.send("run.warning", {"rule": "CHECKPOINT_NOT_ENCRYPTED", "detail": problem[:200], "step": event.get("step")}, job_id=job_id, fencing_token=token)
+                    return False
         for name, entry in manifest["files"].items():
             # An encrypted (GPCK/2) checkpoint uploads the encrypted blob; the manifest's sha256 is the hash of those stored bytes.
             path = directory / (ciphertext_name(name) if manifest.get("format") == "GPCK/2" else name)
