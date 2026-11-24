@@ -1,0 +1,28 @@
+{
+  "merged_from": "/kaggle/working/distill_train/student/checkpoints/step-320",
+  "logical_step": 320,
+  "spec_sha256": "f0d80b659255e42bce05b198bda278885557082e52f910038792c669f2cd0b54",
+  "checkpoint_manifest_sha256": "c54c9dd3a0813cf83675d5bd7b72c3b2a3b9165878f379637ff2e5e9569232b9",
+  "recipe_id": "review-sentiment",
+  "base_model": {
+    "id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "revision": "7ae557604adf67be50417f59c2c2f167def9a775"
+  },
+  "format": "safetensors",
+  "artifacts": {
+    "model-f16.gguf": {
+      "path": "model-f16.gguf",
+      "format": "gguf",
+      "quantization": "F16",
+      "bytes": 994156512,
+      "sha256": "19f269016dc6e8dec0d2705cd879e68c16b8b49d90a74058d212e7c4ea82a895"
+    },
+    "model-Q8_0.gguf": {
+      "path": "model-Q8_0.gguf",
+      "format": "gguf",
+      "quantization": "Q8_0",
+      "bytes": 531067872,
+      "sha256": "16593973b00a9dd7de65db40b7874261b4ca5f0aa056b915d56df5b24ad47755"
+    }
+  }
+}
