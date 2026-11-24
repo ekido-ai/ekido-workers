@@ -19,7 +19,7 @@ RUN pip install --timeout 300 --retries 10 --upgrade "pip>=25.3"
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --timeout 300 --retries 10 --resume-retries 20 "torch==${TORCH_VERSION}"
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --timeout 300 --retries 10 --resume-retries 20 "transformers==5.22.1" "peft==0.21.2" "safetensors" "datasets" "numpy" "eth-account"
+    pip install --timeout 300 --retries 10 --resume-retries 20 "transformers==5.23.0" "peft==0.22.0" "safetensors" "datasets" "numpy" "eth-account"
 
 RUN useradd --create-home --uid 1000 gpuchain && mkdir -p /hf_cache /work && chown -R gpuchain /hf_cache /work
 USER gpuchain

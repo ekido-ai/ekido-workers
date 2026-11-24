@@ -23,7 +23,8 @@ from .workloads import build_workload
 DEFAULT_TIMED_STEPS = 3
 
 
-def probe(config: dict) -> dict:
+def probe(config: dict, data_dir: Path | None = None) -> dict:
+    """data_dir holds the job's files (dataset.jsonl for llm-lora/v1), fetched by the agent beside result.json."""
     spec, exec_config = config["spec"], config["exec"]
     device = config.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")
     gpu = device.startswith("cuda")
@@ -32,7 +33,7 @@ def probe(config: dict) -> dict:
         apply_memory_cap(config.get("capacity_mib"), device)
         if gpu:
             torch.cuda.reset_peak_memory_stats()
-        workload = build_workload(spec, exec_config, device)
+        workload = build_workload(spec, exec_config, device, data_dir=data_dir)
         optimizer = create_optimizer(list(trainable_named_params(workload.model).values()), spec["optimizer"])
         scaler = make_scaler(exec_config["amp"], device)
         workload.model.train()
@@ -73,7 +74,8 @@ def main() -> int:
     if len(sys.argv) != 3:
         print(__doc__, file=sys.stderr)
         return 2
-    result = probe(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")))
+    # The probe folder is the one result.json goes into, in both process and Docker mode.
+    result = probe(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")), data_dir=Path(sys.argv[2]).resolve().parent)
     Path(sys.argv[2]).write_text(json.dumps(result, indent=2), encoding="utf-8")
     return 0
 

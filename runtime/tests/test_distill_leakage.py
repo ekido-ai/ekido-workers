@@ -1,4 +1,5 @@
 """Regression checks for teacher answer leakage."""
+import json
 import unittest
 from unittest import mock
 
@@ -7,6 +8,57 @@ from ekido_runtime import distill
 
 
 class DistillLeakageTest(unittest.TestCase):
+    def test_invoice_target_values_must_all_appear_in_input(self):
+        target = json.dumps({'vendor': 'Zevix Sample Supplier 164', 'invoice_no': 'TEST-00164',
+                             'date': '2024-06-13', 'total': '1248.32', 'gstin': '27ZZZPZ0164Z1ZU'})
+        mismatched = 'Payment statement for XYZ Ltd.: document XYZ-INV-001 dated 2024-05-25; GSTIN 33AZBHC5125Z1ZW; payable 9876.54 INR.'
+        valid = 'ZEVIX SAMPLE SUPPLIER 164; TEST-00164; 2024-06-13; 1248.32; GSTIN 27ZZZPZ0164Z1ZU'
+        self.assertFalse(distill._invoice_values_present(mismatched, target))
+        self.assertTrue(distill._invoice_values_present(valid, target))
+        self.assertFalse(distill._invoice_values_present(valid.replace('1248.32', '11248.320'), target))
+        self.assertFalse(distill._invoice_values_present(valid + ' ' + target, target))
+        self.assertFalse(distill._invoice_values_present(valid, '{}'))
+        self.assertFalse(distill._invoice_values_present(valid, 'not json'))
+        self.assertIn('appear verbatim', distill.generation_prompt('invoice-fields', {'text': 'seed', 'json': target}))
+
+    def test_faq_answer_echo_is_detected_without_losing_unicode(self):
+        answer = 'अपॉइंटमेंट रिसेप्शन डेस्क पर बुक कर सकते हैं।'
+        self.assertTrue(distill._faq_answer_echo('नया सवाल? ' + answer, answer))
+        self.assertFalse(distill._faq_answer_echo('अपॉइंटमेंट कैसे बुक करूँ?', answer))
+        self.assertFalse(distill._faq_answer_echo('कुछ भी', ''))
+
+    def test_generation_rejects_mismatches_and_faq_leakage(self):
+        class Encoded(dict):
+            def to(self, _device):
+                return self
+        class Tokenizer:
+            pad_token_id = 0
+            eos_token_id = 1
+            def __init__(self, outputs):
+                self.outputs = iter(outputs)
+            def __call__(self, _prompt, return_tensors):
+                return Encoded(input_ids=torch.tensor([[1]]))
+            def decode(self, *_args, **_kwargs):
+                return next(self.outputs)
+        model = mock.Mock(training=False)
+        model.generate.return_value = torch.tensor([[1, 2]])
+        target = json.dumps({'vendor': 'Acme', 'invoice_no': 'INV-42', 'date': '2024-01-02',
+                             'total': '20.00', 'gstin': 'GST-123'})
+        counts = {}
+        invoice = distill.generate_rows(model, Tokenizer(['wrong invoice', 'Acme INV-42 2024-01-02 20.00 GST-123']),
+                    'invoice-fields', [{'text': 'seed invoice', 'json': target}],
+                    per_seed=1, attempts=3, device='cpu', filter_counts=counts)
+        self.assertEqual(invoice, [{'text': 'Acme INV-42 2024-01-02 20.00 GST-123', 'json': target}])
+        self.assertEqual(counts['invoice_target_mismatch_rows_dropped'], 1)
+        counts = {}
+        faq = distill.generate_rows(model, Tokenizer(['Question? New Question: another question',
+                                      'When? office khula hai', 'Office kab khulta hai?']),
+                    'faq-bot-hinglish', [{'question': 'seed question', 'answer': 'office khula hai'}],
+                    per_seed=1, attempts=3, device='cpu', filter_counts=counts)
+        self.assertEqual(faq, [{'question': 'Office kab khulta hai?', 'answer': 'office khula hai'}])
+        self.assertEqual(counts['faq_answer_echo_rows_dropped'], 1)
+        self.assertEqual(counts['faq_prompt_marker_rows_dropped'], 1)
+
     def test_distill_cleans_answer_leakage_from_generated_inputs(self):
         self.assertEqual(
             distill._clean('Speaker refund chahiye. The correct category for this ticket is: refund.', 'seed'),
