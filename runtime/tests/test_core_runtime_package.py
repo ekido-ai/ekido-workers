@@ -143,9 +143,19 @@ class Runtime(unittest.TestCase):
     def test_training_checkpoints_and_resume_matches(self):
         # Uninterrupted: 4 steps.
         model_a, tokenizer = tiny_pair(self.train_rows, self.test_rows)
-        evidence_a = train.run_training(self.spec, self.blob, self.tmp / "run-a",
-                                        device="cpu", model=model_a, tokenizer=tokenizer,
-                                        exec_config=EXEC, log=lambda *a: None)
+        with mock.patch.object(train, "_collate", wraps=train._collate) as collate:
+            evidence_a = train.run_training(self.spec, self.blob, self.tmp / "run-a",
+                                            device="cpu", model=model_a, tokenizer=tokenizer,
+                                            exec_config=EXEC, measure_training=True, log=lambda *a: None)
+        batches = [call.args[0] for call in collate.call_args_list]
+        metrics = evidence_a["training_metrics"]
+        self.assertEqual(metrics["steps"], 4)
+        self.assertEqual(metrics["non_padding_tokens"], sum(len(ids) for batch in batches for ids, _ in batch))
+        self.assertEqual(metrics["input_tokens_including_padding"], sum(max(len(ids) for ids, _ in batch) * len(batch) for batch in batches))
+        self.assertGreater(metrics["seconds"], 0)
+        self.assertAlmostEqual(metrics["non_padding_tokens_per_second"], metrics["non_padding_tokens"] / metrics["seconds"])
+        self.assertIsNone(metrics["gpu_name"])
+        self.assertIsNone(metrics["peak_allocated_bytes"])
         self.assertEqual(evidence_a["eval"]["examples"], 20)
         self.assertEqual(len(evidence_a["checkpoints"]), 2)
         manifest = json.loads((self.tmp / "run-a" / "checkpoints" / "step-4" / "manifest.json").read_text())
@@ -156,14 +166,17 @@ class Runtime(unittest.TestCase):
         # Stopped after step 2 (same spec — a spec never changes), resumed in a fresh
         # model: must land on the same weights.
         model_b, _ = tiny_pair(self.train_rows, self.test_rows)
-        train.run_training(self.spec, self.blob, self.tmp / "run-b1",
-                           device="cpu", model=model_b, tokenizer=tokenizer,
-                           exec_config=EXEC, stop_after=2, log=lambda *a: None)
+        first_segment = train.run_training(self.spec, self.blob, self.tmp / "run-b1",
+                                           device="cpu", model=model_b, tokenizer=tokenizer,
+                                           exec_config=EXEC, stop_after=2, log=lambda *a: None)
+        self.assertNotIn("training_metrics", first_segment)
         model_c, _ = tiny_pair(self.train_rows, self.test_rows)
-        train.run_training(self.spec, self.blob, self.tmp / "run-b2",
-                           device="cpu", model=model_c, tokenizer=tokenizer,
-                           resume=self.tmp / "run-b1" / "checkpoints" / "step-2",
-                           exec_config=EXEC, log=lambda *a: None)
+        resumed = train.run_training(self.spec, self.blob, self.tmp / "run-b2",
+                                     device="cpu", model=model_c, tokenizer=tokenizer,
+                                     resume=self.tmp / "run-b1" / "checkpoints" / "step-2",
+                                     exec_config=EXEC, measure_training=True, log=lambda *a: None)
+        self.assertEqual(resumed["training_metrics"]["steps"], 2)
+        self.assertLess(resumed["training_metrics"]["non_padding_tokens"], metrics["non_padding_tokens"])
         final_c = {n: p.detach().clone() for n, p in model_c.named_parameters() if p.requires_grad}
         self.assertEqual(set(final_a), set(final_c))
         for name in final_a:
@@ -176,6 +189,20 @@ class Runtime(unittest.TestCase):
             train.run_training(bad, self.blob, self.tmp / "run-bad",
                                device="cpu", model=model, tokenizer=tokenizer,
                                exec_config=EXEC, log=lambda *a: None)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for GPU metrics")
+    def test_training_reports_cuda_metrics(self):
+        model, tokenizer = tiny_pair(self.train_rows, self.test_rows)
+        evidence = train.run_training(self.spec, self.blob, self.tmp / "measured-gpu",
+                                      device="cuda", model=model, tokenizer=tokenizer,
+                                      exec_config=EXEC, stop_after=1, measure_training=True, log=lambda *a: None)
+        metrics = evidence["training_metrics"]
+        self.assertEqual(metrics["steps"], 1)
+        self.assertGreater(metrics["non_padding_tokens"], 0)
+        self.assertGreater(metrics["seconds"], 0)
+        self.assertEqual(metrics["gpu_name"], torch.cuda.get_device_name())
+        self.assertGreater(metrics["peak_allocated_bytes"], 0)
+        self.assertGreaterEqual(metrics["peak_reserved_bytes"], metrics["peak_allocated_bytes"])
 
     def test_export_merges_checkpoint_to_safetensors(self):
         model, tokenizer = tiny_pair(self.train_rows, self.test_rows)
@@ -199,20 +226,44 @@ class Runtime(unittest.TestCase):
         binary.touch()
         self.assertEqual(export._llama_binary(self.tmp / 'llama', 'llama-quantize'), binary)
 
+    def _legacy_llama_binary(self, _root, name):
+        if name == 'llama-completion':
+            raise FileNotFoundError(name)
+        return self.tmp / 'llama-cli'
+
+    def test_export_raw_completion_disables_chat_template(self):
+        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-completion'), \
+                mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=' order\n')) as run:
+            self.assertEqual(export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt', n_predict=4), 'order')
+        command = run.call_args.args[0]
+        self.assertIn('--no-conversation', command)
+        self.assertIn('--no-display-prompt', command)
+        self.assertIn('--simple-io', command)
+        self.assertEqual(command[command.index('-c') + 1], '512')
+        self.assertNotIn('--single-turn', command)
+
+    def test_export_legacy_refuses_implicit_chat_fallback(self):
+        with mock.patch.object(export, '_llama_binary', side_effect=self._legacy_llama_binary), \
+                mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=1, stdout='invalid argument -no-cnv')) as run:
+            with self.assertRaisesRegex(RuntimeError, 'llama-cli failed'):
+                export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
+        self.assertEqual(run.call_count, 1)
+        self.assertIn('-no-cnv', ' '.join(map(str, run.call_args.args[0])))
+
     def test_export_rejects_empty_cli_output(self):
-        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-cli'), \
+        with mock.patch.object(export, '_llama_binary', side_effect=self._legacy_llama_binary), \
                 mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout='')):
             with self.assertRaisesRegex(RuntimeError, 'no captured answer'):
                 export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
 
     def test_export_reads_answer_after_echoed_prompt(self):
         output = '\x1b[32mLoading model\x1b[0m\n> prompt\norder\nExiting...\n'
-        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-cli'), \
+        with mock.patch.object(export, '_llama_binary', side_effect=self._legacy_llama_binary), \
                 mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=output)):
             self.assertEqual(export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt'), 'order')
 
     def test_export_rejects_startup_banner_without_answer(self):
-        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-cli'), \
+        with mock.patch.object(export, '_llama_binary', side_effect=self._legacy_llama_binary), \
                 mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout='Loading model\nExiting...')):
             with self.assertRaisesRegex(RuntimeError, 'no captured answer'):
                 export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', 'prompt')
@@ -222,7 +273,7 @@ class Runtime(unittest.TestCase):
                   'Ticket: Mera order abhi tak nahi aaya, 5 din ho gaye\nCategory:')
         fixture = Path(__file__).parent / 'fixtures' / 'llama-cli-t4.txt'
         output = fixture.read_bytes().decode('utf-8').replace('\r\n', '\n').replace('\n', '\r\n')
-        with mock.patch.object(export, '_llama_binary', return_value=self.tmp / 'llama-cli'), \
+        with mock.patch.object(export, '_llama_binary', side_effect=self._legacy_llama_binary), \
                 mock.patch.object(export.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=output)):
             self.assertEqual(export.llama_cli_generate(self.tmp, self.tmp / 'model.gguf', prompt), 'order')
     def test_distill_pins_the_default_teacher_and_refuses_an_unpinned_one(self):
@@ -248,9 +299,28 @@ class Runtime(unittest.TestCase):
         self.assertEqual(result['generated_rows'], 1)
         self.assertEqual(result['generation_settings']['seed'], 42)
         self.assertEqual(result['generation_settings']['temperature'], 0.8)
+        self.assertIsNone(result['teacher_requested_revision'])  # injected, not loaded by this run
         self.assertEqual(result['generation_filter_counts']['trailing_label_rows_dropped'], 0)
         lines = (self.tmp / 'filter' / 'student_dataset.jsonl').read_text(encoding='utf-8').splitlines()
         self.assertEqual(json.loads(lines[0])['text'], 'novel example')
+
+    def test_distill_records_requested_pin_when_model_reports_no_commit(self):
+        teacher = SimpleNamespace(config=SimpleNamespace(_commit_hash=None))
+        generated = [{'text': 'novel example', 'label': 'positive'}]
+        with mock.patch('ekido_runtime.llm.load_model', return_value=teacher) as load, \
+                mock.patch('ekido_runtime.llm.load_tokenizer', return_value=object()), \
+                mock.patch.object(distill, 'generate_rows', return_value=generated), \
+                mock.patch.object(train, 'run_training', return_value={'eval': {}, 'base_eval': {}}):
+            result = distill.run_distillation(
+                'review-sentiment', [{'text': 'seed text', 'label': 'positive'}],
+                [{'text': 'test text', 'label': 'positive'}], self.tmp / 'requested-pin',
+                student_model=object(), student_tokenizer=object(), device='cpu', log=lambda *a: None)
+        self.assertEqual(load.call_args.args[1], distill.TEACHER_REVISION)
+        self.assertIsNone(result['teacher_revision'])
+        self.assertEqual(result['teacher_requested_revision'], distill.TEACHER_REVISION)
+        saved = json.loads((self.tmp / 'requested-pin' / 'distill_evidence.json').read_text(encoding='utf-8'))
+        self.assertEqual(saved['teacher_requested_revision'], distill.TEACHER_REVISION)
+        self.assertIsNone(saved['teacher_revision'])
 
     def test_distill_cli_passes_selected_student(self):
         seeds, tests = self.tmp / 'seeds.jsonl', self.tmp / 'test.jsonl'
