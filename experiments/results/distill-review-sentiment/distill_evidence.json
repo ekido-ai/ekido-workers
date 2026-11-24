@@ -1,0 +1,130 @@
+{
+  "workload": "distill/v1 (training half; generation by PR27 run_seed_generation)",
+  "recipe_id": "review-sentiment",
+  "generated_rows": 368,
+  "test_rows": 100,
+  "student": "Qwen/Qwen2.5-0.5B-Instruct",
+  "student_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "student_eval": {
+    "pass_rate": 0.73,
+    "score": 0.73,
+    "metric": "accuracy",
+    "examples": 100,
+    "eval_set_hash": "e2ad8e2df78d665c5d6b1ed61d00c9b8aa692d729f035ffac7f2c3a2d9c82a25",
+    "floor": 0.8,
+    "meets_floor": false,
+    "samples": [
+      {
+        "reference": "positive",
+        "answer": " positive",
+        "passed": true
+      },
+      {
+        "reference": "negative",
+        "answer": " neutral",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " positive",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " neutral",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " neutral",
+        "passed": false
+      },
+      {
+        "reference": "positive",
+        "answer": " positive",
+        "passed": true
+      },
+      {
+        "reference": "negative",
+        "answer": " positive",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " negative",
+        "passed": true
+      },
+      {
+        "reference": "neutral",
+        "answer": " neutral",
+        "passed": true
+      },
+      {
+        "reference": "neutral",
+        "answer": " neutral",
+        "passed": true
+      }
+    ]
+  },
+  "student_base_eval": {
+    "pass_rate": 0.51,
+    "score": 0.51,
+    "metric": "accuracy",
+    "examples": 100,
+    "eval_set_hash": "e2ad8e2df78d665c5d6b1ed61d00c9b8aa692d729f035ffac7f2c3a2d9c82a25",
+    "floor": 0.8,
+    "meets_floor": false,
+    "samples": [
+      {
+        "reference": "positive",
+        "answer": " Positive\n\nI used",
+        "passed": true
+      },
+      {
+        "reference": "negative",
+        "answer": " Neutral\n\nThis review",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " Neutral\n\nThis review",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " Neutral\n\nThis review",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " Neutral\n\nThis review",
+        "passed": false
+      },
+      {
+        "reference": "positive",
+        "answer": " Neutral\nYou are",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " Neutral\n\nThis review",
+        "passed": false
+      },
+      {
+        "reference": "negative",
+        "answer": " To determine if this",
+        "passed": false
+      },
+      {
+        "reference": "neutral",
+        "answer": " Negative\n\nThis review",
+        "passed": false
+      },
+      {
+        "reference": "neutral",
+        "answer": " Neutral\nAnswer:\n",
+        "passed": true
+      }
+    ]
+  }
+}
