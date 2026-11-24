@@ -39,3 +39,7 @@ PYTHONPATH=.:../../packages/ekido_core:../../workers/runtime python -m unittest 
 ```
 
 On Windows PowerShell, set `$env:PYTHONPATH = ".;..\..\packages\ekido_core;..\..\workers\runtime"` first.
+
+## Checking generated rows (distillation, ticket #141)
+
+`ekido_verifier/generated_rows.py` re-checks the `generated.jsonl` a teacher writes: schema, the recipe's label set, overlap with the customer's test inputs, copies of seeds, duplicates, and the generator's leak filters. It is pure Python and deterministic (no GPU, no model, no network), returns a verdict with reason codes, and is strict by default: one violating row fails the file. Its filters are a copy of `ekido_runtime.distill`'s, kept equal by a test, so the verifier never imports `torch`. It is not yet called by the verifier worker: that wiring waits for the distillation contract.
