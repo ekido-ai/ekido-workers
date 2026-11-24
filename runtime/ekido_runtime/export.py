@@ -32,6 +32,7 @@ from ekido_core.canonical import document_hash
 from ekido_core.gpck import load_checkpoint
 
 from .llm import load_model, load_tokenizer
+from .export_artifacts import export_lock, record_gguf
 from .train import apply_lora, _trainable
 
 
@@ -57,6 +58,8 @@ def merge_checkpoint(spec: dict, checkpoint_dir: Path, out_dir: Path, *, base_mo
     info = {
         "merged_from": str(checkpoint_dir),
         "logical_step": manifest.get("logical_step"),
+        "spec_sha256": document_hash(spec),
+        "checkpoint_manifest_sha256": document_hash(manifest),
         "recipe_id": spec["recipe_id"],
         "base_model": spec["model"],
         "format": "safetensors",
@@ -183,19 +186,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gguf", action="store_true", help="also convert to GGUF (needs llama.cpp)")
     parser.add_argument("--quantize", nargs="*", default=[], help="GGUF quantisations to produce, e.g. Q4_K_M Q8_0")
     parser.add_argument("--llama-cpp", type=Path, default=None)
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu", help="device used to merge the checkpoint")
     args = parser.parse_args(argv)
 
+    if any(not re.fullmatch(r'[A-Za-z0-9_]{1,32}', quant) for quant in args.quantize):
+        parser.error('quantization names must contain only letters, digits and underscores')
+
     spec = json.loads(args.spec.read_text(encoding="utf-8"))
-    info = merge_checkpoint(spec, args.checkpoint, args.out)
-    print(f"merged safetensors -> {args.out} (from step {info['logical_step']})")
-    if args.gguf or args.quantize:
-        llama_cpp = find_llama_cpp(args.llama_cpp)
-        gguf = to_gguf(args.out, args.out / "model-f16.gguf", llama_cpp=llama_cpp)
-        print(f"gguf -> {gguf}")
-        for quant in args.quantize:
-            out = args.out / f"model-{quant}.gguf"
-            quantize_gguf(gguf, out, quant, llama_cpp=llama_cpp)
-            print(f"gguf {quant} -> {out}")
+    with export_lock(args.out):
+        info = merge_checkpoint(spec, args.checkpoint, args.out, device=args.device)
+        print(f"merged safetensors -> {args.out} (from step {info['logical_step']})")
+        if args.gguf or args.quantize:
+            llama_cpp = find_llama_cpp(args.llama_cpp)
+            gguf = to_gguf(args.out, args.out / "model-f16.gguf", llama_cpp=llama_cpp)
+            record_gguf(args.out, gguf, "F16")
+            print(f"gguf -> {gguf}")
+            for quant in args.quantize:
+                out = args.out / f"model-{quant}.gguf"
+                quantize_gguf(gguf, out, quant, llama_cpp=llama_cpp)
+                record_gguf(args.out, out, quant)
+                print(f"gguf {quant} -> {out}")
     return 0
 
 
