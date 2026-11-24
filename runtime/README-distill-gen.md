@@ -9,6 +9,8 @@ teacher and generator revisions, the requested quantization setting, and a
 private job work directory. The report records hashes, settings and counts;
 it does not include the seed or held-out text. The work directory and generated
 file do contain customer-derived data and require access control and cleanup.
+The filter counters include zeroes; annotation removals can overlap with a
+later rejection, so counters are not necessarily mutually exclusive.
 
 The checkpoint binds the job ID, input hashes and generation settings; on retry,
 a different identity or damaged checkpoint fails closed. A kernel-held lock

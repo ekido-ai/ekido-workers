@@ -128,6 +128,24 @@ class SeedGeneration(unittest.TestCase):
         self.assertEqual(report['generated_rows'], 1)
         self.assertEqual(report['filter_counts']['trailing_label_rows_dropped'], 1)
 
+    @unittest.skipUnless(importlib.util.find_spec('torch'), 'torch is required for the actual teacher filter')
+    def test_teacher_filter_counts_empty_and_duplicate_candidates(self):
+        import torch
+        class Encoded(dict):
+            def to(self, _device): return self
+        class Tokenizer:
+            pad_token_id, eos_token_id = 0, 1
+            def __init__(self): self.outputs = iter(['seed one', 'new ticket one', 'new ticket one', 'new ticket two'])
+            def __call__(self, _prompt, return_tensors): return Encoded(input_ids=torch.tensor([[1]]))
+            def decode(self, *_args, **_kwargs): return next(self.outputs)
+        model = mock.Mock(training=False)
+        model.generate.return_value = torch.tensor([[1, 2]])
+        report = self.run_job(seed_rows=[self.seeds[0]], teacher_model=model, teacher_tokenizer=Tokenizer(),
+                              per_seed=2, generate=None)
+        self.assertEqual(report['generated_rows'], 2)
+        self.assertEqual(report['filter_counts']['clean_rejected'], 1)
+        self.assertEqual(report['filter_counts']['generation_duplicate_rows_dropped'], 1)
+
     @unittest.skipUnless(importlib.util.find_spec('torch') and importlib.util.find_spec('transformers'),
                          'tiny-model dependencies are required')
     def test_tiny_teacher_reaches_a_complete_seed_boundary(self):

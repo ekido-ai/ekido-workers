@@ -13,6 +13,11 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
+FILTER_NAMES = ('clean_rejected', 'answer_annotations_removed', 'trailing_label_rows_dropped',
+                'classification_text_rows_dropped', 'invoice_target_mismatch_rows_dropped',
+                'faq_answer_echo_rows_dropped', 'faq_prompt_marker_rows_dropped',
+                'generation_duplicate_rows_dropped', 'duplicate_or_held_out_rows_dropped')
+
 
 def _json_bytes(value):
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
@@ -126,7 +131,8 @@ def run_seed_generation(*, job_id, recipe_id, seed_rows, test_rows, out_dir, tea
     directory.mkdir(parents=True, exist_ok=True)
     with _writer_lock(directory):
         checkpoint = directory / 'seed-progress.json'
-        state = {'identity': identity, 'completed_seeds': 0, 'rows': [], 'filter_counts': {}}
+        state = {'identity': identity, 'completed_seeds': 0, 'rows': [],
+                 'filter_counts': {name: 0 for name in FILTER_NAMES}}
         if checkpoint.exists():
             if checkpoint.stat().st_size > 50_000_000:
                 raise ValueError('checkpoint too large')
