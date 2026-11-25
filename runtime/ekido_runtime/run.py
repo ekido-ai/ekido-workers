@@ -223,7 +223,9 @@ def save_checkpoint(config: dict, workload, optimizer, scaler, completed_step: i
     target = directory / f"step_{completed_step:08d}"
     target.mkdir(parents=True, exist_ok=True)
     faults.during_checkpoint(completed_step, target)
-    return target, write_checkpoint(target, trainable, optimizer_tensors, manifest)
+    # With a job recipient (the public age key, sent by the coordinator) the checkpoint is GPCK/2: its files are also written encrypted.
+    # The runtime never needs the secret key: the agent decrypts any checkpoint it resumes from before the runtime reads it.
+    return target, write_checkpoint(target, trainable, optimizer_tensors, manifest, recipient=config.get("job_recipient"))
 
 
 def restore(config: dict, workload, optimizer, events: Events, device: str):
