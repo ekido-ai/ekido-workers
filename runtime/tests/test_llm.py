@@ -13,6 +13,7 @@ if HAVE_ML:
     from transformers import AutoModelForCausalLM, Qwen2Config
 
     from ekido_runtime.llm import IGNORE, build_llm, encode
+    from ekido_runtime.trainer import canary_loss
 
 
 class CharTokenizer:
@@ -69,6 +70,19 @@ class LlmWorkload(unittest.TestCase):
     def test_long_prompts_lose_their_start_not_the_answer(self):
         batch = encode(CharTokenizer(), [{"prompt": "x" * 100, "completion": " positive"}], 32)
         self.assertEqual(int((batch["labels"][0] != IGNORE).sum()), len(" positive") + 1)
+
+    def test_the_canary_scored_in_parts_equals_scoring_all_rows_at_once(self):
+        model, _, _, canary = self.build()
+        self.assertGreater(len(canary["input_ids"]), 2)
+        # Score rows on different numbers of tokens, so a plain average of the parts would be wrong.
+        labels = canary["labels"].clone()
+        scored = torch.nonzero(labels[0] != IGNORE).flatten()
+        labels[0, scored[:-2]] = IGNORE
+        canary = {**canary, "labels": labels}
+        model.eval()
+        with torch.no_grad():
+            whole = float(model(**canary).loss.item())
+        self.assertAlmostEqual(canary_loss(model, canary, "cpu"), whole, places=5)
 
     def test_only_training_rows_are_used_and_the_hash_is_checked(self):
         _, size, batch_fn, canary = self.build()

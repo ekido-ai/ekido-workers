@@ -106,13 +106,30 @@ def run_logical_step(
     return StepResult(step=step, loss=loss, grad_norm=float(grad_norm), lr=lr)
 
 
+CANARY_CHUNK = 2
+
+
 @torch.no_grad()
 def canary_loss(model: torch.nn.Module, batch: Mapping[str, torch.Tensor], device: str) -> float:
-    """Eval-mode loss without autocast. Compared after a restore, to catch a broken resume early."""
+    """Eval-mode loss without autocast. Compared after a restore, to catch a broken resume early.
+
+    A language-model batch (one label per token) is scored a few rows at a time: all at once, the model builds a score for
+    every word of the vocabulary at every token, 2.3 GB for 16 rows of 256 tokens with Qwen, which ran a 6 GB card out of
+    memory at its first checkpoint. The rows are weighted by the tokens they are scored on, so the mean is the same."""
     was_training = model.training
     model.eval()
     try:
-        return float(model(**{k: v.to(device) for k, v in batch.items()}).loss.item())
+        labels = batch.get("labels")
+        if labels is None or labels.ndim != 2 or len(labels) <= CANARY_CHUNK:
+            return float(model(**{k: v.to(device) for k, v in batch.items()}).loss.item())
+        total, tokens = 0.0, 0
+        for start in range(0, len(labels), CANARY_CHUNK):
+            part = {k: v[start : start + CANARY_CHUNK].to(device) for k, v in batch.items()}
+            scored = int((part["labels"][:, 1:] != -100).sum())  # the first token has nothing before it to predict it from
+            if scored:
+                total += float(model(**part).loss.item()) * scored
+                tokens += scored
+        return total / tokens if tokens else float("nan")
     finally:
         model.train(was_training)
 
