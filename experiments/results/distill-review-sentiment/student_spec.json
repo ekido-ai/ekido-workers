@@ -1,0 +1,43 @@
+{
+  "template": "llm-lora/v1",
+  "recipe_id": "review-sentiment",
+  "model": {
+    "id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "revision": "7ae557604adf67be50417f59c2c2f167def9a775"
+  },
+  "dataset": {
+    "sha256": "9c9ff3fe22d03e4d4d65e6fc1b5efed0db0126d1f90359f74315926c99cd37c4",
+    "bytes": 62066,
+    "train_rows": 368,
+    "test_rows": 100
+  },
+  "lora": {
+    "r": 16,
+    "alpha": 32,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "v_proj"
+    ]
+  },
+  "max_seq_length": 512,
+  "logical_batch_size": 8,
+  "total_logical_steps": 320,
+  "seed": 42,
+  "checkpoint_every_steps": 320,
+  "optimizer": {
+    "name": "adamw",
+    "lr": 0.0002,
+    "weight_decay": 0.0,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "eps": 1e-08,
+    "max_grad_norm": 1.0
+  },
+  "lr_schedule": {
+    "name": "linear_warmup_linear_decay",
+    "warmup_steps": 10
+  }
+}
