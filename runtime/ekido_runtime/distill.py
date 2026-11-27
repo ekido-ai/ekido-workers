@@ -143,6 +143,8 @@ def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: l
                 text = teacher_tokenizer.decode(output[0, encoded["input_ids"].shape[1]:], skip_special_tokens=True)
                 candidate = _clean(text, seed_row[source], filter_counts)
                 if candidate is None:
+                    if filter_counts is not None:
+                        filter_counts['clean_rejected'] = filter_counts.get('clean_rejected', 0) + 1
                     continue
                 if _trailing_label(candidate, r.labels):
                     if filter_counts is not None:
@@ -166,6 +168,8 @@ def generate_rows(teacher_model, teacher_tokenizer, recipe_id: str, seed_rows: l
                     continue
                 key = re.sub(r"\s+", " ", candidate.lower())
                 if key in seen:
+                    if filter_counts is not None:
+                        filter_counts['generation_duplicate_rows_dropped'] = filter_counts.get('generation_duplicate_rows_dropped', 0) + 1
                     continue
                 seen.add(key)
                 rows.append({source: candidate, target: seed_row[target]})
