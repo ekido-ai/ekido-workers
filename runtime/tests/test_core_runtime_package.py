@@ -226,6 +226,40 @@ class Runtime(unittest.TestCase):
         binary.touch()
         self.assertEqual(export._llama_binary(self.tmp / 'llama', 'llama-quantize'), binary)
 
+    def test_export_cli_records_q8_and_passes_cuda_to_merge(self):
+        import hashlib
+        import struct
+        spec_path = self.tmp / 'spec.json'
+        spec_path.write_text(json.dumps(self.spec), encoding='utf-8')
+        out = self.tmp / 'exported'
+        payload = struct.pack('<4sIQQ', b'GGUF', 3, 1, 1) + b'synthetic'
+        def merge(_spec, _checkpoint, destination, *, device):
+            self.assertEqual(device, 'cuda')
+            (destination / 'export.json').write_text(json.dumps({'format': 'safetensors'}), encoding='utf-8')
+            return {'logical_step': 4}
+        def convert(_model_dir, destination, **_kwargs):
+            destination.write_bytes(payload)
+            return destination
+        def quantize(_source, destination, quant, **_kwargs):
+            self.assertEqual(quant, 'Q8_0')
+            destination.write_bytes(payload)
+            return destination
+        with mock.patch.object(export, 'merge_checkpoint', side_effect=merge), \
+             mock.patch.object(export, 'find_llama_cpp', return_value=self.tmp), \
+             mock.patch.object(export, 'to_gguf', side_effect=convert), \
+             mock.patch.object(export, 'quantize_gguf', side_effect=quantize):
+            self.assertEqual(export.main(['--spec', str(spec_path), '--checkpoint', str(self.tmp / 'ckpt'),
+                                          '--out', str(out), '--device', 'cuda', '--quantize', 'Q8_0']), 0)
+        info = json.loads((out / 'export.json').read_text(encoding='utf-8'))
+        self.assertEqual(info['artifacts']['model-Q8_0.gguf']['sha256'], hashlib.sha256(payload).hexdigest())
+        self.assertEqual(info['artifacts']['model-Q8_0.gguf']['quantization'], 'Q8_0')
+
+    def test_export_cli_rejects_path_like_quantization_before_work(self):
+        with mock.patch.object(export, 'merge_checkpoint') as merge, self.assertRaises(SystemExit):
+            export.main(['--spec', 'missing', '--checkpoint', 'missing', '--out', str(self.tmp / 'out'),
+                         '--quantize', '../bad'])
+        merge.assert_not_called()
+
     def _legacy_llama_binary(self, _root, name):
         if name == 'llama-completion':
             raise FileNotFoundError(name)
